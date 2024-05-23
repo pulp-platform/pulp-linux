@@ -1,0 +1,4 @@
+config BR2_PACKAGE_CACHETEST
+       bool "cachetest"
+       help
+	Simple cache testing benchmark.
