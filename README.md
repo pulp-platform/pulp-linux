@@ -15,6 +15,14 @@ TBD
 Requirements Ubuntu
 TBD
 
+IIS Machines
+
+Spawn a subshell with the required tools already installed by calling
+```bash
+riscv -riscv64-gcc-linux-gnu-11.2.0 bash
+```
+
+
 Now build a target image containing OpenSBI, GNU/Linux and a rootfs by running
 the following commands:
 
@@ -23,7 +31,7 @@ the following commands:
 make setup
 # Call buildroot's makefile based buildsystem
 cd buildroot
-make
+make -j
 ```
 
 If everything goes right you should find GNU/Linux and the combined OpenSBI + GNU/Linux image in
@@ -50,13 +58,13 @@ Make sure you flashed your FPGA with the target platform's bitstream.
 Open a Terminal and connect to your FPGA with OpenOCD:
 
 ```bash
-openocd -f target/cheshire/cheshire.cfg
+$ openocd -f target/cheshire/cheshire.cfg
 ```
 
 This will provide an endpoint GNU GDB can connect which you can by calling
 
 ```bash
-riscv64-unknown-linux-gnu-gdb
+$ riscv64-unknown-linux-gnu-gdb
 # then in GDB
 gdb> target extended-remote localhost:3333
 gdb> load buildroot/output/images/fw_payload.elf
