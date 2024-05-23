@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/cachetest/Config.in"
+source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/vitetris/Config.in"
