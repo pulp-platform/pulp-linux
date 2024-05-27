@@ -32,6 +32,8 @@ make setup
 # Call buildroot's makefile based buildsystem
 cd buildroot
 make -j
+# Workaround for issue https://github.com/pulp-platform/pulp-linux/issues/3
+make opensbi-rebuild
 ```
 
 If everything goes right you should find GNU/Linux and the combined OpenSBI + GNU/Linux image in
