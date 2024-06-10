@@ -57,6 +57,16 @@ To save this as a new configuration try `make savedefconfig`.
 
 Make sure you flashed your FPGA with the target platform's bitstream.
 
+First connect to the serial device port:
+
+```bash
+$ minicom -D /dev/ttyUSBX
+```
+
+where `X` might be any number larger or equal to zero. Check with e.g. `dmesg`
+on which port your serial device is exposed.
+
+
 Open a Terminal and connect to your FPGA with OpenOCD:
 
 ```bash
@@ -81,6 +91,7 @@ gdb> add-symbol-file buildroot/output/images/fw_payload.elf
 ```
 
 before `load` ing `fw_payload.elf`.
+
 
 ## Booting from an SD card
 
