@@ -1,0 +1,38 @@
+# Configuration file defining the structure of the SD card
+
+image linux.vfat {
+    vfat {
+        files = {
+            "uImage"
+        }
+    }
+    size = #SIZE#
+}
+
+image linux.gpt.img {
+    hdimage {
+        align = 512
+        partition-table-type = "gpt"
+    }
+    partition zsl {
+        partition-type-uuid = 0269B26A-FD95-4CE4-98CF-941401412C62
+        image = "zsl.rom.bin"
+        offset = 32K
+    }
+    partition dtb {
+        partition-type-uuid = BA442F61-2AEF-42DE-9233-E4D75D3ACB9D
+        image = "cheshire.dtb"
+        offset = 64K
+    }
+    partition fw {
+        partition-type-uuid = 99EC86DA-3F5B-4B0D-8F4B-C4BACFA5F859
+        image = "fw_payload.bin"
+        offset = 1024K
+    }
+    partition uImage {
+        partition-type-uuid = linux
+        image = "linux.vfat"
+        offset = 4096K
+    }
+}
+    

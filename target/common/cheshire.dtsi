@@ -5,20 +5,29 @@
 // Nicole Narr <narrn@student.ethz.ch>
 // Christopher Reinwardt <creinwar@student.ethz.ch>
 // Axel Vanoni <axvanoni@student.ethz.ch>
+// Luka Guzenko <lguzenko@student.ethz.ch>
 
 /dts-v1/;
+
 / {
+
   #address-cells = <2>;
   #size-cells = <2>;
   compatible = "eth,cheshire-dev";
   model = "eth,cheshire";
-  chosen {
+
+  chosen: chosen {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    ranges;
     stdout-path = "/soc/serial@3002000:115200";
   };
+  
   memory@80000000 {
     device_type = "memory";
     reg = <0x0 0x80000000 0x0 0x40000000>;
   };
+
   cpus {
     #address-cells = <1>;
     #size-cells = <0>;
@@ -28,7 +37,21 @@
       status = "okay";
       compatible = "eth,ariane", "riscv";
       clock-frequency = <50000000>; // 50 MHz
-      riscv,isa = "rv64imafdc";
+      riscv,isa-base = "rv64i";
+      riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicbom", "zicbop", "zicboz", "zicond", "zicntr", "zicsr", "zifencei", "zihpm", "zcb";
+//      d-cache-block-size = <64>;
+//      d-cache-sets = <128>;
+//      d-cache-size = <32768>;
+//      d-tlb-sets = <1>;
+//      d-tlb-size = <16>;
+//      i-cache-block-size = <128>;
+//      i-cache-sets = <32>;
+//      i-cache-size = <16384>;
+//      i-tlb-sets = <1>;
+//      i-tlb-size = <16>;
+//      riscv,cbom-block-size = <16>;
+//      riscv,cbop-block-size = <16>;
+//      riscv,cboz-block-size = <16>;
       mmu-type = "riscv,sv39";
       tlb-split;
       reg = <0>;
@@ -40,6 +63,7 @@
       };
     };
   };
+
   soc: soc {
     #address-cells = <2>;
     #size-cells = <2>;
@@ -74,22 +98,16 @@
       interrupts = <2 3 4 5 6 7 8 9 10 11 12 13 14 15 16>;
       reg = <0x0 0x3003000 0x0 0x1000>;
     };
-    spi@3004000 {
+    spi: spi@3004000 {
       compatible = "opentitan,spi-host", "lowrisc,spi";
       interrupt-parent = <&PLIC0>;
       interrupts = <17 18>;
       reg = <0x0 0x3004000 0x0 0x1000>;
+      num-cs = <2>;
       clock-frequency = <50000000>;
       max-frequency = <25000000>;
       #address-cells = <1>;
       #size-cells = <0>;
-      mmc@0 {
-        compatible = "mmc-spi-slot";
-        reg = <0>;
-        spi-max-frequency = <25000000>;
-        voltage-ranges = <3300 3300>;
-        disable-wp;
-      };
     };
     vga@3007000 {
       compatible = "eth,axi-vga";
@@ -112,4 +130,5 @@
       reg = <0x0 0x4000000 0x0 0x4000000>;
     };
   };
+
 };
