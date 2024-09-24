@@ -1,0 +1,28 @@
+// Copyright 2024 ETH Zurich and University of Bologna.
+// Solderpad Hardware License, Version 0.51, see LICENSE for details.
+// SPDX-License-Identifier: SHL-0.51
+//
+// Cyril Koenig <cykoenig@iis.ee.ethz.ch>
+
+/include/ "cheshire.dtsi"
+
+&spi {
+  boot-with = <0>;
+  mmc@0 {
+    compatible = "mmc-spi-slot";
+    reg = <0>; // CS
+    spi-max-frequency = <25000000>;
+    voltage-ranges = <3300 3300>;
+    disable-wp;
+  };
+};
+
+&soc {
+  usb@3008000 {
+    compatible = "generic-ohci";
+//    dma-noncoherent;
+    reg = <0x0 0x3008000 0x0 0x1000>;
+    interrupt-parent = <&PLIC0>;
+    interrupts = <19>;
+  };
+};
