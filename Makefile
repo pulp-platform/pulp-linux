@@ -3,21 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Robert Balas <balasr@iis.ee.ethz.ch>
-
-DTC = dtc
-
-%.dtb: %.dts
-	$(DTC) -o $@ $^
+# Luka Guzenko <lguzenko@student.ethz.ch>
 
 .PHONY: setup
-setup: target/cheshire/cheshire.dtb
-	$(MAKE) -C buildroot BR2_EXTERNAL=.. cheshire_defconfig
+setup:
+	$(MAKE) -C buildroot BR2_EXTERNAL=.. cheshire-minimal_defconfig
+	$(MAKE) -C buildroot make
 
 
 .PHONY: clean
 clean-buildroot:
 	$(MAKE) -C buildroot clean
-
-.PHONY: clean-all
-clean: clean-buildroot
-	$(RM) target/cheshire/*.dtb
