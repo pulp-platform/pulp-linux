@@ -1,2 +1,2 @@
-name: CVA6_LINUX
-desc: Build GNU/Linux for CVA6-based systems
+name: PULP_LINUX
+desc: Build GNU/Linux for PULP-based systems
