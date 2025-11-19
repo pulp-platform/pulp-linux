@@ -92,6 +92,21 @@ gdb> add-symbol-file buildroot/output/images/fw_payload.elf
 
 before `load` ing `fw_payload.elf`.
 
+## Building a kernel module
+As Buildroot does not track dependencies, you need to issue the correct build
+commands manually in order to make sure that that any modified code is properly
+compiled.
+
+For example, for the hello world module you need to run
+
+```bash
+make hello-kmod-rebuild
+make -j
+make opensbi-rebuild
+```
+
+in the `buildroot/` directory.
+
 
 ## Booting from an SD card
 
