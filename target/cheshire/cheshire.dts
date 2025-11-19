@@ -53,6 +53,7 @@
     axi_llc@3001000 {
       compatible = "eth,axi-llc";
       reg = <0x0 0x3001000 0x0 0x5000>;
+      reg = <0x0 0x3001000 0x0 0x1000>;
     };
     ddr_link: memory-controller@3006000 {
       compatible = "eth,ddr-link";
