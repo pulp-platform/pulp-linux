@@ -53,6 +53,7 @@
     axi_llc@3001000 {
       compatible = "eth,axi-llc", "eth,axi-llc-partitioning";
       reg = <0x0 0x3001000 0x0 0x1000>;
+      tagger = <&tagger0>;
     };
     ddr_link: memory-controller@3006000 {
       compatible = "eth,ddr-link";
@@ -94,6 +95,10 @@
     vga@3007000 {
       compatible = "eth,axi-vga";
       reg = <0x0 0x3007000 0x0 0x1000>;
+    };
+    tagger0: axi-tagger@300a000 {
+      compatible = "eth,axi-transaction-tagger";
+      reg = <0x0 0x300a000 0x0 0x1000>;
     };
     clint@2040000 {
       compatible = "riscv,clint0";

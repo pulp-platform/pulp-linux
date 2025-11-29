@@ -7,10 +7,13 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/device.h>
+
 #include "axi_llc_regs.h"
+#include "tagger_regs.h"
 
 struct llc {
 	void __iomem *regs;
+	void __iomem *tagger_regs;
 	struct dentry *debugfs;
 };
 
@@ -68,6 +71,44 @@ static void llc_print_partitioning(struct device *dev)
 		return;
 	}
 	dev_info(dev, "partitioning feature available\n");
+}
+
+static void llc_print_tagger(struct device *dev)
+{
+	u32 commit, addr_conf;
+
+	struct llc *llc = dev_get_drvdata(dev);
+
+	if (!llc->tagger_regs) {
+		dev_info(dev, "no transaction tagger mapped\n");
+		return;
+	}
+
+
+	addr_conf = readl(llc->tagger_regs + TAGGER_REG_ADDR_CONF_REG_OFFSET);
+	dev_info(dev, "tagger: addr_conf = 0x%08x\n", addr_conf);
+
+	for (int i = 0; i < TAGGER_REG_PAT_ADDR_MULTIREG_COUNT; i++) {
+		u32 addr_reg =
+			readl(llc->tagger_regs +
+			      (TAGGER_REG_PAT_ADDR_0_REG_OFFSET + i * 4));
+
+		/*
+		 * pat_addr holds an address/size encoding; the HW spec defines
+		 * the exact interpretation. Here we just print the raw value
+		 * and a shifted version (assuming bottom 2 bits are dropped).
+		 */
+		dev_info(dev,
+			 "tagger: pat_addr[%02d] = 0x%08x (base<<2=0x%08x)\n",
+			 i, addr_reg, addr_reg << 2);
+	}
+
+	for (int i = 0; i < TAGGER_REG_PATID_MULTIREG_COUNT; i++) {
+		u32 reg = readl(llc->tagger_regs +
+				(TAGGER_REG_PATID_0_REG_OFFSET + i * 4));
+
+		dev_info(dev, "tagger: patid[%d] = 0x%08x\n", i, reg);
+	}
 }
 
 static ssize_t spm_config_show(struct device *dev,
@@ -225,20 +266,52 @@ static int llc_probe(struct platform_device *pdev)
 {
 	struct llc *llc;
 	struct resource *res;
+	struct device_node *tagger_np;
+	struct resource tagger_res;
+	int ret;
 
-	llc = devm_kzalloc(&pdev->dev, sizeof(*llc), GFP_KERNEL);
+	struct device *dev = &pdev->dev;
+
+	llc = devm_kzalloc(dev, sizeof(*llc), GFP_KERNEL);
 	if (!llc)
 		return -ENOMEM;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	llc->regs = devm_ioremap_resource(&pdev->dev, res);
+	llc->regs = devm_ioremap_resource(dev, res);
 	if (IS_ERR(llc->regs))
 		return PTR_ERR(llc->regs);
 
+	llc->tagger_regs = NULL;
+
+	tagger_np = of_parse_phandle(dev->of_node, "tagger", 0);
+	if (!tagger_np) {
+		dev_info(dev, "no 'tagger' phandle in device tree\n");
+	} else {
+		ret = of_address_to_resource(tagger_np, 0, &tagger_res);
+		of_node_put(tagger_np);
+
+		if (ret) {
+			dev_warn(dev, "failed to get tagger resource: %d\n",
+				 ret);
+		} else {
+			llc->tagger_regs =
+				devm_ioremap_resource(dev, &tagger_res);
+			if (IS_ERR(llc->tagger_regs)) {
+				dev_warn(dev, "failed to map tagger regs\n");
+				llc->tagger_regs = NULL;
+			} else {
+				dev_info(dev,
+					 "mapped transaction tagger @ %pa\n",
+					 &tagger_res.start);
+			}
+		}
+	}
+
 	platform_set_drvdata(pdev, llc);
 
-	llc_print_config(&pdev->dev);
-	llc_print_partitioning(&pdev->dev);
+	llc_print_config(dev);
+	llc_print_partitioning(dev);
+	llc_print_tagger(dev);
 
 	return 0;
 }
