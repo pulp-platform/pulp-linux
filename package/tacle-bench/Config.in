@@ -1,0 +1,8 @@
+config BR2_PACKAGE_TACLE_BENCH
+	bool "tacle-bench"
+	help
+	  TACLe benchmark collection.
+
+	  This package builds the pulp-platform fork of TACLeBench
+	  (branch bluew/build) and installs the generated benchmark
+	  binaries into /usr/bin on the target. :contentReference[oaicite:0]{index=0}
