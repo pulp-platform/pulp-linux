@@ -1,0 +1,37 @@
+From c27bbdfae2e34ba7ea0dec3c9e59ff368cb374a1 Mon Sep 17 00:00:00 2001
+From: bluew <bluewww@users.noreply.github.com>
+Date: Fri, 5 Dec 2025 21:01:24 +0100
+Subject: [PATCH] Makefile: Remove mandatory call to setup
+
+The original Makefile assumes it is in a git checkout and uses setup-*
+targets that call `git submodule`. In Buildroot the source tree is
+extracted from a tarball and is not a git repo, so those commands fail.
+---
+ Makefile | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 9e0d4ac..4bdf880 100644
+--- a/Makefile
++++ b/Makefile
+@@ -43,7 +43,7 @@ compile-isolbench:
+ 	@echo 'Compiling IsolBench'
+ 	make -C ${CURDIR}/IsolBench/
+ 
+-compile-tacle: setup-tacle
++compile-tacle:
+ 	@echo 'Compiling TACLeBench'
+ 	make -C ${CURDIR}/rt-tacle-bench/
+ 
+@@ -51,7 +51,7 @@ compile-vision:
+ 	@echo 'Compiling SD-VBS'
+ 	make -C ${CURDIR}/vision/ compile
+ 
+-compile-image-filters: setup-image-filters
++compile-image-filters:
+ 	@echo 'Compiling image-filters'
+ 	make -C ${CURDIR}/image-filters/
+ 
+-- 
+2.44.0
+

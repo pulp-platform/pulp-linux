@@ -1,0 +1,13 @@
+config BR2_PACKAGE_RT_BENCH
+	bool "rt-bench"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_JSON_C
+	help
+	  RT-Bench: an extensible benchmark framework for real-time
+	  applications, including TACLeBench, SD-VBS and IsolBench
+	  based benchmarks. :contentReference[oaicite:3]{index=3}
+
+	  This package fetches the rt-bench framework from GitLab
+	  and uses its top-level Makefile (setup-*/compile-* targets)
+	  to build all integrated benchmark suites, then installs the
+	  resulting executables into /usr/bin on the target.
