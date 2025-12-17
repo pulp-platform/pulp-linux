@@ -247,6 +247,125 @@ static ssize_t partitioning_config_store(struct device *dev,
 
 static DEVICE_ATTR_RW(partitioning_config);
 
+
+/* mode encoding is PMP-like: 0=OFF, 1=TOR, 2=NA4, 3=NAPOT.
+ * We do a few cheap sanity checks before programming the HW.
+ */
+static int tagger_check_addr_mode(unsigned int mode, u64 addr)
+{
+	/* All modes: address must be 4-byte aligned (encoding uses >> 2). */
+	if (addr & 0x3)
+		return -EINVAL;
+
+	switch (mode & 0x3) {
+	case 0: /* OFF */
+		/* For OFF, insist the address is 0 to avoid garbage config. */
+		if (addr != 0)
+			return -EINVAL;
+		break;
+	case 1: /* TOR */
+		/* TOR uses an upper bound; allow any aligned addr. */
+		break;
+	case 2: /* NA4 */
+		/* NA4 = single 4-byte word; aligned addr is enough here. */
+		break;
+	case 3: /* NAPOT */
+		/*
+		 * For NAPOT we at least require non-zero (otherwise it's
+		 * indistinguishable from OFF-ish encodings). A proper size
+		 * check would inspect the encoded bits, but we keep it simple.
+		 */
+		if (!addr)
+			return -EINVAL;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static ssize_t tagger_addr_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct llc *llc = dev_get_drvdata(dev);
+	int i;
+	ssize_t len = 0;
+
+	if (!llc->tagger_regs)
+		return sysfs_emit(buf, "no_tagger\n");
+
+	for (i = 0; i < TAGGER_REG_PAT_ADDR_MULTIREG_COUNT; i++) {
+		u32 addr_reg = readl(llc->tagger_regs +
+				     (TAGGER_REG_PAT_ADDR_0_REG_OFFSET +
+				      i * 4));
+		u32 addr_conf = readl(llc->tagger_regs +
+				      TAGGER_REG_ADDR_CONF_REG_OFFSET);
+		unsigned int shift = (i % 16) * 2;
+		unsigned int mode = (addr_conf >> shift) & 0x3;
+		u64 base = (u64)addr_reg << 2;
+
+		len += scnprintf(buf + len, PAGE_SIZE - len,
+				 "%2d: mode=%u addr_reg=0x%08x base=0x%016llx\n",
+				 i, mode, addr_reg, base);
+		if (len >= PAGE_SIZE)
+			break;
+	}
+
+	return len;
+}
+
+static ssize_t tagger_addr_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct llc *llc = dev_get_drvdata(dev);
+	unsigned int idx, mode;
+	u64 addr;
+	int ret;
+
+	if (!llc->tagger_regs)
+		return -ENODEV;
+
+	/* Expected format: "<idx> <addr> <mode>" */
+	ret = sscanf(buf, "%u %llx %u", &idx, &addr, &mode);
+	if (ret != 3)
+		return -EINVAL;
+
+	if (idx >= TAGGER_REG_PAT_ADDR_MULTIREG_COUNT)
+		return -EINVAL;
+
+	ret = tagger_check_addr_mode(mode, addr);
+	if (ret)
+		return ret;
+
+	/* Encode address for HW: drop lower 2 bits (PMP-style). */
+	if (addr >> 34)	/* conservative: make sure it fits in 32 bits after >>2 */
+		return -EINVAL;
+	writel((u32)(addr >> 2),
+	       llc->tagger_regs +
+		       (TAGGER_REG_PAT_ADDR_0_REG_OFFSET + idx * 4));
+
+	/* Update mode bits in addr_conf register (2 bits per entry). */
+	{
+		u32 addr_conf = readl(llc->tagger_regs +
+				      TAGGER_REG_ADDR_CONF_REG_OFFSET);
+		unsigned int shift = (idx % 16) * 2;
+		u32 mask = 0x3u << shift;
+
+		addr_conf = (addr_conf & ~mask) |
+			    ((mode & 0x3u) << shift);
+		writel(addr_conf,
+		       llc->tagger_regs + TAGGER_REG_ADDR_CONF_REG_OFFSET);
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(tagger_addr);
+
+
+
 static struct attribute *llc_attrs[] = {
 	&dev_attr_spm_config.attr,	    &dev_attr_flush_config.attr,
 	&dev_attr_bist_result.attr,	    &dev_attr_partitioning.attr,
@@ -261,6 +380,9 @@ static const struct attribute_group *llc_groups[] = {
 	&llc_group,
 	NULL,
 };
+
+
+
 
 static int llc_probe(struct platform_device *pdev)
 {
