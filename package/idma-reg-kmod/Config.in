@@ -1,0 +1,5 @@
+config BR2_PACKAGE_IDMA_REG_KMOD
+    bool "iDMA reg kernel module"
+    depends on BR2_LINUX_KERNEL
+    help
+      iDMA driver kernel module that uses the vanilla reg hardware interface.

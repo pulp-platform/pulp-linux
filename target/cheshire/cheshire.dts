@@ -50,6 +50,12 @@
       reg-names = "control";
       reg = <0x0 0x0 0x0 0x1000>;
     };
+    idma0: idma@1000000 {
+      compatible = "eth,idma-reg64-2d", "eth,idma-reg";
+      reg = <0x0 0x01000000 0x0 0x1000>;
+       /* Optional: how many streams you actually wired up / want to expose */
+      dma-channels = <1>;
+    };
     axi_llc@3001000 {
       compatible = "eth,axi-llc", "eth,axi-llc-partitioning";
       reg = <0x0 0x3001000 0x0 0x1000>;
