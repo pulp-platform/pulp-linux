@@ -22,6 +22,9 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/sched.h>
 
 #define DRV_NAME "cheshire-idma-reg"
 
@@ -81,6 +84,25 @@ struct cheshire_idma {
 	u64 src_stride2;
 	u64 dst_stride2;
 	u64 reps2;
+
+
+	/* stress / interference generator */
+	struct {
+		bool enabled;
+		struct task_struct *task;
+
+		/* one contiguous pool: [src | dst] */
+		void *pool_cpu;
+		dma_addr_t pool_dma;
+		size_t pool_bytes;
+
+		size_t half_bytes;
+		u32 poll_us;
+		u32 stream;
+
+		u64 iters;
+		u64 bytes_total;
+	} stress;
 
 	u32 last_id[16];
 };
@@ -169,6 +191,212 @@ static int idma_wait_done(struct cheshire_idma *idma, u32 stream, u32 id, u32 ti
 	return ret;
 }
 
+
+/* iDMA stress workload using a kernel thread to reschedule transfers. This is
+ * for benchmarking interference on caches/buses. */
+
+/*
+ * Submit a single transfer with explicit parameters.
+ *
+ * Note: parameter registers are global (shared by all streams), therefore any
+ * concurrent users must serialize access (we reuse idma->lock for that).
+ */
+static int idma_submit_xfer_locked(struct cheshire_idma *idma, u32 stream,
+				  u64 src, u64 dst, u64 len,
+				  u64 src_stride2, u64 dst_stride2, u64 reps2,
+				  u32 *out_id)
+{
+	u32 id;
+
+	if (stream >= idma->num_streams)
+		return -EINVAL;
+
+	idma_write64(idma, IDMA_REG_SRC_ADDR_LO, src);
+	idma_write64(idma, IDMA_REG_DST_ADDR_LO, dst);
+	idma_write64(idma, IDMA_REG_LEN_LO,      len);
+
+	if (idma->variant->has_2d) {
+		idma_write64(idma, IDMA_REG_SRC_STRIDE2_LO, src_stride2);
+		idma_write64(idma, IDMA_REG_DST_STRIDE2_LO, dst_stride2);
+		idma_write64(idma, IDMA_REG_REPS2_LO,       reps2);
+	}
+
+	wmb();
+
+	id = idma_read_next_id(idma, stream);
+	if (id == 0)
+		return -EIO;
+
+	idma->last_id[stream] = id;
+	if (out_id)
+		*out_id = id;
+
+	return 0;
+}
+
+static int idma_stress_thread(void *arg)
+{
+	struct cheshire_idma *idma = arg;
+
+	/* Keep CPU disturbance low by running at low priority. */
+	set_user_nice(current, 19);
+
+	while (!kthread_should_stop()) {
+		u32 id, done;
+		u64 src, dst;
+		size_t len;
+		u32 stream, poll_us;
+		int ret;
+
+		mutex_lock(&idma->lock);
+		if (!idma->stress.enabled) {
+			mutex_unlock(&idma->lock);
+			break;
+		}
+
+		stream  = idma->stress.stream;
+		poll_us = idma->stress.poll_us;
+		len     = idma->stress.half_bytes;
+
+		src = (u64)idma->stress.pool_dma;
+		dst = (u64)idma->stress.pool_dma + idma->stress.half_bytes;
+
+		ret = idma_submit_xfer_locked(idma, stream, src, dst, len,
+					      0, 0, 0, &id);
+		mutex_unlock(&idma->lock);
+
+		if (ret) {
+			usleep_range(1000, 2000);
+			continue;
+		}
+
+		/* Wait for completion with (optional) sleeping to avoid CPU hogging. */
+		for (;;) {
+			if (kthread_should_stop())
+				return 0;
+
+			done = idma_read_done_id(idma, stream);
+			if (done >= id)
+				break;
+
+			if (poll_us)
+				usleep_range(poll_us, poll_us + 20);
+			else
+				cpu_relax();
+		}
+
+		mutex_lock(&idma->lock);
+		idma->stress.iters++;
+		idma->stress.bytes_total += len;
+		mutex_unlock(&idma->lock);
+	}
+
+	return 0;
+}
+
+static int idma_stress_start(struct device *dev, struct cheshire_idma *idma)
+{
+	size_t half, pool;
+
+	if (idma->stress.enabled)
+		return 0;
+
+	half = idma->stress.half_bytes;
+	if (half < 4096)
+		return -EINVAL;
+	if (half > ((~(size_t)0) / 2))
+		return -EINVAL;
+
+	if (idma->stress.stream >= idma->num_streams)
+		return -EINVAL;
+
+	pool = half * 2;
+
+	idma->stress.pool_cpu = dma_alloc_coherent(dev, pool, &idma->stress.pool_dma,
+						   GFP_KERNEL);
+	if (!idma->stress.pool_cpu)
+		return -ENOMEM;
+
+	idma->stress.pool_bytes = pool;
+	memset(idma->stress.pool_cpu, 0, pool);
+
+	idma->stress.iters = 0;
+	idma->stress.bytes_total = 0;
+
+	idma->stress.enabled = true;
+	idma->stress.task = kthread_run(idma_stress_thread, idma, "idma_stress");
+	if (IS_ERR(idma->stress.task)) {
+		int err = PTR_ERR(idma->stress.task);
+
+		idma->stress.task = NULL;
+		idma->stress.enabled = false;
+
+		dma_free_coherent(dev, pool, idma->stress.pool_cpu, idma->stress.pool_dma);
+		idma->stress.pool_cpu = NULL;
+		idma->stress.pool_dma = 0;
+		idma->stress.pool_bytes = 0;
+
+		return err;
+	}
+
+	return 0;
+}
+
+/*
+ * Stop the stress thread and wait for any outstanding DMA to complete before
+ * freeing its backing buffer.
+ *
+ * Must NOT be called with idma->lock held (kthread_stop waits for the thread,
+ * which also takes idma->lock).
+ */
+static void idma_stress_stop(struct device *dev, struct cheshire_idma *idma)
+{
+	struct task_struct *t;
+	void *cpu;
+	dma_addr_t dma;
+	size_t bytes;
+	u32 stream;
+	u32 last;
+	int ret;
+
+	mutex_lock(&idma->lock);
+	if (!idma->stress.task) {
+		idma->stress.enabled = false;
+		mutex_unlock(&idma->lock);
+		return;
+	}
+
+	idma->stress.enabled = false;
+
+	t = idma->stress.task;
+	cpu = idma->stress.pool_cpu;
+	dma = idma->stress.pool_dma;
+	bytes = idma->stress.pool_bytes;
+	stream = idma->stress.stream;
+	last = idma->last_id[stream];
+	mutex_unlock(&idma->lock);
+
+	/* Ensure the thread stops submitting new work. */
+	kthread_stop(t);
+
+	/* Wait for the last submitted transfer to complete (best-effort). */
+	if (last) {
+		ret = idma_wait_done(idma, stream, last, 5 * 1000 * 1000);
+		if (ret)
+			dev_warn(dev, "stress: timeout waiting for stream%u id=%u (%d)\n",
+				 stream, last, ret);
+	}
+
+	if (cpu)
+		dma_free_coherent(dev, bytes, cpu, dma);
+
+	mutex_lock(&idma->lock);
+	idma->stress.task = NULL;
+	idma->stress.pool_cpu = NULL;
+	idma->stress.pool_dma = 0;
+	idma->stress.pool_bytes = 0;
+	mutex_unlock(&idma->lock);
+}
 static void idma_print_config(struct device *dev, struct cheshire_idma *idma)
 {
 	u32 conf = readl_relaxed(idma->regs + IDMA_REG_CONF);
@@ -270,7 +498,7 @@ out:
 	return ret;
 }
 
-/* ---------------- sysfs ---------------- */
+/* sysfs entries */
 
 static struct cheshire_idma *dev_to_idma(struct device *dev)
 {
@@ -379,6 +607,9 @@ static ssize_t submit_store(struct device *dev, struct device_attribute *attr,
 	if (one != 1)
 		return count;
 
+	if (idma->stress.task)
+		return -EBUSY;
+
 	mutex_lock(&idma->lock);
 	stream = idma->stream;
 	ret = idma_submit_locked(idma, stream, &id);
@@ -468,6 +699,196 @@ static ssize_t wait_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_WO(wait);
 
+
+static ssize_t stress_enable_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "%u\n", idma->stress.enabled ? 1 : 0);
+}
+
+static ssize_t stress_enable_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+	u32 v;
+	int ret = 0;
+
+	if (kstrtou32(buf, 0, &v))
+		return -EINVAL;
+
+	if (v) {
+		mutex_lock(&idma->lock);
+		ret = idma_stress_start(dev, idma);
+		mutex_unlock(&idma->lock);
+	} else {
+		idma_stress_stop(dev, idma);
+	}
+
+	return ret ? ret : count;
+}
+static DEVICE_ATTR_RW(stress_enable);
+
+static ssize_t stress_half_bytes_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "%zu\n", idma->stress.half_bytes);
+}
+
+static ssize_t stress_half_bytes_store(struct device *dev,
+				       struct device_attribute *attr,
+				       const char *buf, size_t count)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+	unsigned long v;
+
+	if (kstrtoul(buf, 0, &v))
+		return -EINVAL;
+
+	mutex_lock(&idma->lock);
+	if (idma->stress.enabled) {
+		mutex_unlock(&idma->lock);
+		return -EBUSY;
+	}
+	idma->stress.half_bytes = (size_t)v;
+	mutex_unlock(&idma->lock);
+
+	return count;
+}
+static DEVICE_ATTR_RW(stress_half_bytes);
+
+static ssize_t stress_poll_us_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "%u\n", idma->stress.poll_us);
+}
+
+static ssize_t stress_poll_us_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+	u32 v;
+
+	if (kstrtou32(buf, 0, &v))
+		return -EINVAL;
+
+	mutex_lock(&idma->lock);
+	idma->stress.poll_us = v;
+	mutex_unlock(&idma->lock);
+
+	return count;
+}
+static DEVICE_ATTR_RW(stress_poll_us);
+
+static ssize_t stress_stream_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "%u\n", idma->stress.stream);
+}
+
+static ssize_t stress_stream_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+	u32 v;
+
+	if (kstrtou32(buf, 0, &v))
+		return -EINVAL;
+
+	mutex_lock(&idma->lock);
+	if (idma->stress.enabled) {
+		mutex_unlock(&idma->lock);
+		return -EBUSY;
+	}
+	if (v >= idma->num_streams) {
+		mutex_unlock(&idma->lock);
+		return -EINVAL;
+	}
+	idma->stress.stream = v;
+	mutex_unlock(&idma->lock);
+
+	return count;
+}
+static DEVICE_ATTR_RW(stress_stream);
+
+static ssize_t stress_pool_dma_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "0x%016llx\n",
+			  (unsigned long long)idma->stress.pool_dma);
+}
+static DEVICE_ATTR_RO(stress_pool_dma);
+
+static ssize_t stress_pool_bytes_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "%zu\n", idma->stress.pool_bytes);
+}
+static DEVICE_ATTR_RO(stress_pool_bytes);
+
+static ssize_t stress_src_dma_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "0x%016llx\n",
+			  (unsigned long long)idma->stress.pool_dma);
+}
+static DEVICE_ATTR_RO(stress_src_dma);
+
+static ssize_t stress_dst_dma_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+
+	return sysfs_emit(buf, "0x%016llx\n",
+			  (unsigned long long)(idma->stress.pool_dma +
+					       idma->stress.half_bytes));
+}
+static DEVICE_ATTR_RO(stress_dst_dma);
+
+static ssize_t stress_iters_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+	u64 v;
+
+	mutex_lock(&idma->lock);
+	v = idma->stress.iters;
+	mutex_unlock(&idma->lock);
+
+	return sysfs_emit(buf, "%llu\n", (unsigned long long)v);
+}
+static DEVICE_ATTR_RO(stress_iters);
+
+static ssize_t stress_bytes_total_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct cheshire_idma *idma = dev_to_idma(dev);
+	u64 v;
+
+	mutex_lock(&idma->lock);
+	v = idma->stress.bytes_total;
+	mutex_unlock(&idma->lock);
+
+	return sysfs_emit(buf, "%llu\n", (unsigned long long)v);
+}
+static DEVICE_ATTR_RO(stress_bytes_total);
+
 static struct attribute *cheshire_idma_attrs[] = {
 	&dev_attr_conf.attr,
 	&dev_attr_stream.attr,
@@ -487,6 +908,18 @@ static struct attribute *cheshire_idma_attrs[] = {
 	&dev_attr_last_id.attr,
 	&dev_attr_done_id.attr,
 	&dev_attr_busy.attr,
+
+	/* interference / stress mode */
+	&dev_attr_stress_enable.attr,
+	&dev_attr_stress_half_bytes.attr,
+	&dev_attr_stress_poll_us.attr,
+	&dev_attr_stress_stream.attr,
+	&dev_attr_stress_pool_dma.attr,
+	&dev_attr_stress_pool_bytes.attr,
+	&dev_attr_stress_src_dma.attr,
+	&dev_attr_stress_dst_dma.attr,
+	&dev_attr_stress_iters.attr,
+	&dev_attr_stress_bytes_total.attr,
 	NULL,
 };
 
@@ -549,6 +982,10 @@ static int cheshire_idma_probe(struct platform_device *pdev)
 	idma->num_streams = nstreams;
 	idma->stream = 0;
 
+	idma->stress.half_bytes = 2 * 1024 * 1024;
+	idma->stress.poll_us = 100;
+	idma->stress.stream = 0;
+
 	platform_set_drvdata(pdev, idma);
 
 	idma_print_config(&pdev->dev, idma);
@@ -569,8 +1006,19 @@ static int cheshire_idma_probe(struct platform_device *pdev)
 	return 0;
 }
 
+
+static int cheshire_idma_remove(struct platform_device *pdev)
+{
+	struct cheshire_idma *idma = platform_get_drvdata(pdev);
+
+	idma_stress_stop(&pdev->dev, idma);
+
+	return 0;
+}
+
 static struct platform_driver cheshire_idma_driver = {
 	.probe = cheshire_idma_probe,
+	.remove = cheshire_idma_remove,
 	.driver = {
 		.name           = DRV_NAME,
 		.of_match_table = cheshire_idma_of_match,
@@ -580,5 +1028,5 @@ static struct platform_driver cheshire_idma_driver = {
 module_platform_driver(cheshire_idma_driver);
 
 MODULE_DESCRIPTION("Cheshire iDMA driver");
-MODULE_AUTHOR("Robert Balas <balasr@is.ee.ethz.ch>");
+MODULE_AUTHOR("Robert Balas <balasr@iis.ee.ethz.ch>");
 MODULE_LICENSE("Dual MIT/GPL");
