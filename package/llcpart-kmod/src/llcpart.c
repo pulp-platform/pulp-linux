@@ -7,13 +7,26 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/device.h>
+#include <linux/ioport.h>
 
 #include "axi_llc_regs.h"
 #include "tagger_regs.h"
+#include "chs_xilinx_regs.h"
+
+/*
+ * Cheshire Genesys2/Xilinx board regs MMIO window.
+ * In cheshire_top_xilinx.sv this is mapped to 0x4300_0000..0x4300_0FFF.
+ */
+#define CHS_XILINX_REGS_BASE 0x43000000UL
+#define CHS_XILINX_REGS_SIZE 0x1000UL
 
 struct llc {
 	void __iomem *regs;
 	void __iomem *tagger_regs;
+
+	/* Xilinx/Genesys2 board regs window (fan/led/delay regs) */
+	void __iomem *xilinx_regs;
+
 	struct dentry *debugfs;
 };
 
@@ -110,6 +123,30 @@ static void llc_print_tagger(struct device *dev)
 		dev_info(dev, "tagger: patid[%d] = 0x%08x\n", i, reg);
 	}
 }
+
+static void llc_print_xilinx_regs(struct device *dev)
+{
+	struct llc *llc = dev_get_drvdata(dev);
+
+	if (!llc->xilinx_regs) {
+		dev_info(dev, "no xilinx board regs mapped\n");
+		return;
+	}
+
+	dev_info(dev, "xilinx regs: fan_ctl=0x%08x fan_sw_override=0x%08x leds=0x%08x\n",
+		 readl(llc->xilinx_regs + CHS_XILINX_FAN_CTL_REG_OFFSET),
+		 readl(llc->xilinx_regs + CHS_XILINX_FAN_SW_OVERRIDE_REG_OFFSET),
+		 readl(llc->xilinx_regs + CHS_XILINX_LEDS_REG_OFFSET));
+
+	dev_info(dev, "xilinx regs: dram_aw=%u dram_w=%u dram_b=%u dram_ar=%u dram_r=%u\n",
+		 readl(llc->xilinx_regs + CHS_XILINX_DRAM_AW_DELAY_REG_OFFSET) & 0xffff,
+		 readl(llc->xilinx_regs + CHS_XILINX_DRAM_W_DELAY_REG_OFFSET) & 0xffff,
+		 readl(llc->xilinx_regs + CHS_XILINX_DRAM_B_DELAY_REG_OFFSET) & 0xffff,
+		 readl(llc->xilinx_regs + CHS_XILINX_DRAM_AR_DELAY_REG_OFFSET) & 0xffff,
+		 readl(llc->xilinx_regs + CHS_XILINX_DRAM_R_DELAY_REG_OFFSET) & 0xffff);
+}
+
+/* ---------------- LLC sysfs ---------------- */
 
 static ssize_t spm_config_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
@@ -364,12 +401,91 @@ static ssize_t tagger_addr_store(struct device *dev,
 
 static DEVICE_ATTR_RW(tagger_addr);
 
+/* ---------------- Xilinx regs sysfs ---------------- */
 
+static int llc_xilinx_check(struct llc *llc)
+{
+	return llc->xilinx_regs ? 0 : -ENODEV;
+}
+
+static ssize_t xilinx_reg32_show(struct device *dev, u32 off, char *buf)
+{
+	struct llc *llc = dev_get_drvdata(dev);
+	u32 v;
+
+	if (llc_xilinx_check(llc))
+		return -ENODEV;
+
+	v = readl(llc->xilinx_regs + off);
+	return sysfs_emit(buf, "0x%08x\n", v);
+}
+
+static ssize_t xilinx_reg32_store(struct device *dev, u32 off,
+				  const char *buf, size_t count)
+{
+	struct llc *llc = dev_get_drvdata(dev);
+	u32 v;
+	int ret;
+
+	if (llc_xilinx_check(llc))
+		return -ENODEV;
+
+	ret = kstrtou32(buf, 0, &v);
+	if (ret)
+		return ret;
+
+	writel(v, llc->xilinx_regs + off);
+	(void)readl(llc->xilinx_regs + off);
+	return count;
+}
+
+#define DECL_XREG_RW(_name, _off)                                            \
+	static ssize_t _name##_show(struct device *dev,                       \
+				    struct device_attribute *attr,          \
+				    char *buf)                              \
+	{                                                                      \
+		return xilinx_reg32_show(dev, (_off), buf);                    \
+	}                                                                      \
+	static ssize_t _name##_store(struct device *dev,                      \
+				     struct device_attribute *attr,         \
+				     const char *buf, size_t count)         \
+	{                                                                      \
+		return xilinx_reg32_store(dev, (_off), buf, count);            \
+	}                                                                      \
+	static DEVICE_ATTR_RW(_name)
+
+DECL_XREG_RW(xilinx_fan_ctl, CHS_XILINX_FAN_CTL_REG_OFFSET);
+DECL_XREG_RW(xilinx_fan_sw_override, CHS_XILINX_FAN_SW_OVERRIDE_REG_OFFSET);
+DECL_XREG_RW(xilinx_leds, CHS_XILINX_LEDS_REG_OFFSET);
+DECL_XREG_RW(xilinx_dram_aw_delay, CHS_XILINX_DRAM_AW_DELAY_REG_OFFSET);
+DECL_XREG_RW(xilinx_dram_w_delay, CHS_XILINX_DRAM_W_DELAY_REG_OFFSET);
+DECL_XREG_RW(xilinx_dram_b_delay, CHS_XILINX_DRAM_B_DELAY_REG_OFFSET);
+DECL_XREG_RW(xilinx_dram_ar_delay, CHS_XILINX_DRAM_AR_DELAY_REG_OFFSET);
+DECL_XREG_RW(xilinx_dram_r_delay, CHS_XILINX_DRAM_R_DELAY_REG_OFFSET);
+
+/* ---------------- sysfs group ---------------- */
 
 static struct attribute *llc_attrs[] = {
-	&dev_attr_spm_config.attr,	    &dev_attr_flush_config.attr,
-	&dev_attr_bist_result.attr,	    &dev_attr_partitioning.attr,
-	&dev_attr_partitioning_config.attr, NULL, /* terminator */
+	&dev_attr_spm_config.attr,
+	&dev_attr_flush_config.attr,
+	&dev_attr_bist_result.attr,
+	&dev_attr_partitioning.attr,
+	&dev_attr_partitioning_config.attr,
+
+	/* tagger programming */
+	&dev_attr_tagger_addr.attr,
+
+	/* xilinx board regs */
+	&dev_attr_xilinx_fan_ctl.attr,
+	&dev_attr_xilinx_fan_sw_override.attr,
+	&dev_attr_xilinx_leds.attr,
+	&dev_attr_xilinx_dram_aw_delay.attr,
+	&dev_attr_xilinx_dram_w_delay.attr,
+	&dev_attr_xilinx_dram_b_delay.attr,
+	&dev_attr_xilinx_dram_ar_delay.attr,
+	&dev_attr_xilinx_dram_r_delay.attr,
+
+	NULL, /* terminator */
 };
 
 static const struct attribute_group llc_group = {
@@ -404,7 +520,9 @@ static int llc_probe(struct platform_device *pdev)
 		return PTR_ERR(llc->regs);
 
 	llc->tagger_regs = NULL;
+	llc->xilinx_regs = NULL;
 
+	/* Map transaction tagger if present via phandle */
 	tagger_np = of_parse_phandle(dev->of_node, "tagger", 0);
 	if (!tagger_np) {
 		dev_info(dev, "no 'tagger' phandle in device tree\n");
@@ -429,11 +547,32 @@ static int llc_probe(struct platform_device *pdev)
 		}
 	}
 
+	/* Hard-map Cheshire Genesys2/Xilinx board regs at fixed address */
+	{
+		struct resource xilinx_res = {
+			.start = CHS_XILINX_REGS_BASE,
+			.end   = CHS_XILINX_REGS_BASE + CHS_XILINX_REGS_SIZE - 1,
+			.flags = IORESOURCE_MEM,
+			.name  = "chs-xilinx-regs",
+		};
+
+		llc->xilinx_regs = devm_ioremap_resource(dev, &xilinx_res);
+		if (IS_ERR(llc->xilinx_regs)) {
+			dev_warn(dev, "failed to map xilinx regs @ 0x%08lx\n",
+				 (unsigned long)CHS_XILINX_REGS_BASE);
+			llc->xilinx_regs = NULL;
+		} else {
+			dev_info(dev, "mapped xilinx regs @ 0x%08lx\n",
+				 (unsigned long)CHS_XILINX_REGS_BASE);
+		}
+	}
+
 	platform_set_drvdata(pdev, llc);
 
 	llc_print_config(dev);
 	llc_print_partitioning(dev);
 	llc_print_tagger(dev);
+	llc_print_xilinx_regs(dev);
 
 	return 0;
 }
