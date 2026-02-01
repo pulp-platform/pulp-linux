@@ -1,0 +1,4 @@
+config BR2_PACKAGE_CACHEPROBE
+       bool "cacheprobe"
+       help
+	Cache pointer-chase (latency test) and stream (bandwidth test) workload
