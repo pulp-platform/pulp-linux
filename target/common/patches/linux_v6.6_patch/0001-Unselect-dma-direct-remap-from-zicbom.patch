@@ -1,0 +1,10 @@
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -555,7 +555,6 @@
+ 	depends on RISCV_ALTERNATIVE
+ 	default y
+ 	select RISCV_DMA_NONCOHERENT
+-	select DMA_DIRECT_REMAP
+ 	help
+ 	   Adds support to dynamically detect the presence of the ZICBOM
+ 	   extension (Cache Block Management Operations) and enable its

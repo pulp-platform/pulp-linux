@@ -19,6 +19,21 @@
     device_type = "memory";
     reg = <0x0 0x80000000 0x0 0x40000000>;
   };
+
+  reserved-memory {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    ranges;
+
+    // Use SPM uncached scratchpad region for coherent DMA (fix it to use DRAM later).
+    coherent_dma_pool: dma-pool@14000000 {
+      compatible = "shared-dma-pool";
+      reg = <0x0 0x14000000 0x0 0x00020000>;
+      no-map;
+      linux,dma-default;
+    };
+  };
+
   cpus {
     #address-cells = <1>;
     #size-cells = <0>;
@@ -28,7 +43,9 @@
       status = "okay";
       compatible = "eth,ariane", "riscv";
       clock-frequency = <50000000>; // 50 MHz
-      riscv,isa = "rv64imafdc";
+      riscv,isa-base = "rv64i";
+      riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "h", "zkn", "zicbom", "zicsr", "zifencei", "zicntr", "zihpm", "zbb", "zicond";
+      riscv,cbom-block-size = <16>;
       mmu-type = "riscv,sv39";
       tlb-split;
       reg = <0>;
@@ -44,6 +61,7 @@
     #address-cells = <2>;
     #size-cells = <2>;
     compatible = "eth,cheshire-bare-soc", "simple-bus";
+    dma-noncoherent;
     ranges;
     debug@0 {
       compatible = "riscv,debug-013";
@@ -79,6 +97,7 @@
       interrupt-parent = <&PLIC0>;
       interrupts = <17 18>;
       reg = <0x0 0x3004000 0x0 0x1000>;
+      num-cs = <2>;
       clock-frequency = <50000000>;
       max-frequency = <25000000>;
       #address-cells = <1>;
@@ -90,10 +109,24 @@
         voltage-ranges = <3300 3300>;
         disable-wp;
       };
+      nor@1 {
+        compatible = "s25fl256s1", "jedec,spi-nor";
+        reg = <1>; // CS
+        spi-max-frequency = <25000000>;
+        disable-wp;
+      };
     };
     vga@3007000 {
       compatible = "eth,axi-vga";
       reg = <0x0 0x3007000 0x0 0x1000>;
+    };
+    usb@3008000 {
+      compatible = "generic-ohci";
+      dma-noncoherent;
+      reg = <0x0 0x3008000 0x0 0x1000>;
+      interrupt-parent = <&PLIC0>;
+      interrupts = <19>;
+      memory-region = <&coherent_dma_pool>;
     };
     clint@2040000 {
       compatible = "riscv,clint0";

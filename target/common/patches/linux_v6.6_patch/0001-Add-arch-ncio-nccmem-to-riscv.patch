@@ -1,0 +1,17 @@
+--- b/arch/riscv/Kconfig.socs
++++ b/arch/riscv/Kconfig.socs
+@@ -1,4 +1,14 @@
+ menu "SoC selection"
++
++config ARCH_NCIO_NCCMEM
++	bool "SoCs with noncoherent IO and noncoherent cached memory"
++	select RISCV_DMA_NONCOHERENT
++	select DMA_GLOBAL_POOL
++	help
++	  Select this for SoCs that have noncoherent IO and therefore need
++	  RISCV_DMA_NONCOHERENT, but also noncoherent, cached memory, thus
++	  needing DMA_GLOBAL_POOL to allocate consistent DMA buffers from
++	  uncached shared-dma-pools separate from main memory.
+ 
+ config ARCH_MICROCHIP_POLARFIRE
+ 	def_bool SOC_MICROCHIP_POLARFIRE
