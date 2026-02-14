@@ -6,8 +6,8 @@ Subject: [PATCH] Add OpenTitan QSPI host driver
 ---
  drivers/spi/Kconfig         |   5 +
  drivers/spi/Makefile        |   1 +
- drivers/spi/spi-opentitan.c | 757 ++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 763 insertions(+)
+ drivers/spi/spi-opentitan.c | 777 ++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 783 insertions(+)
  create mode 100644 drivers/spi/spi-opentitan.c
 
 diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
@@ -40,10 +40,10 @@ index 6fea5821662e..4e780ab642d3 100644
  obj-$(CONFIG_SPI_PIC32)			+= spi-pic32.o
 diff --git a/drivers/spi/spi-opentitan.c b/drivers/spi/spi-opentitan.c
 new file mode 100644
-index 000000000000..6e613f65fdf2
+index 000000000000..870aff9f5b60
 --- /dev/null
 +++ b/drivers/spi/spi-opentitan.c
-@@ -0,0 +1,757 @@
+@@ -0,0 +1,777 @@
 +#include <linux/io.h>
 +#include <linux/interrupt.h>
 +#include <linux/module.h>
@@ -103,7 +103,7 @@ index 000000000000..6e613f65fdf2
 +  	unsigned int clk_freq; 		/* Peripheral clock frequency */
 +	unsigned int max_freq; 		/* Max supported SPI frequency */
 +	unsigned int cur_freq;		/* Current SPI clock frequency */
-+	unsigned int cs_state; 		/* 0 = CS currently not asserted, 1 = CS currently asserted */
++	bool cs_asserted;		/* Whether CS is asserted (SPI core view) */
 +	unsigned int used_cs;		/* Which CS shall be used for the current transfer */
 +	unsigned int unused_cs;		/* Which CS should be used for de-selecting the target */
 +	unsigned char byte_order; 	/* 1 = LSB shifted in/out first, 0 = MSB shifted in/out first */
@@ -113,21 +113,21 @@ index 000000000000..6e613f65fdf2
 +static int opentitan_qspi_issue_dummy(struct spi_master *master, unsigned int bitlen, unsigned long flags)
 +{
 +	struct opentitan_qspi_priv *priv = spi_master_get_devdata(master);
-+	unsigned char csaat 	= !(flags & SPI_XFER_END) && (priv->cs_state || flags & SPI_XFER_BEGIN);
++	unsigned char csaat 	= !(flags & SPI_XFER_END) && (priv->cs_asserted || flags & SPI_XFER_BEGIN);
 +   	// Wait for the SPI host to be ready
 +   	unsigned int ready_timeout = OPENTITAN_QSPI_READY_TIMEOUT;
 +   	unsigned int status = 0;
 +    unsigned int command = 0;
 +
 +	if(flags & SPI_XFER_BEGIN){
-+		priv->cs_state = 1;
++		priv->cs_asserted = 1;
 +		iowrite32(priv->used_cs, priv->regs + REG_CSID);
 +	}
 +
 +	// Just setting the CS
 +	if(bitlen == 0){
 +		if(flags & SPI_XFER_END){
-+			priv->cs_state = 0;
++			priv->cs_asserted = 0;
 +			iowrite32(priv->unused_cs, priv->regs + REG_CSID);
 +			opentitan_qspi_issue_dummy(master, 8, 0);
 +		}
@@ -152,7 +152,7 @@ index 000000000000..6e613f65fdf2
 +	} while((status >> 30) & 0x1);
 +
 +	if(flags & SPI_XFER_END){
-+		priv->cs_state = 0;
++		priv->cs_asserted = 0;
 +		iowrite32(priv->unused_cs, priv->regs + REG_CSID);
 +	}
 +
@@ -168,7 +168,7 @@ index 000000000000..6e613f65fdf2
 +	unsigned int command = 0;
 +    unsigned int status  = 0;
 +    unsigned int ready_timeout = OPENTITAN_QSPI_READY_TIMEOUT;
-+	unsigned char csaat 	= !(flags & SPI_XFER_END) && (priv->cs_state || flags & SPI_XFER_BEGIN);
++	unsigned char csaat 	= !(flags & SPI_XFER_END) && (priv->cs_asserted || flags & SPI_XFER_BEGIN);
 +	unsigned char dir   	= (din != NULL) | ((dout != NULL) << 1);
 +
 +    if(!dout && !din)
@@ -180,14 +180,14 @@ index 000000000000..6e613f65fdf2
 +	}
 +	
 +	if(flags & SPI_XFER_BEGIN){
-+		priv->cs_state = 1;
++		priv->cs_asserted = 1;
 +		iowrite32(priv->used_cs, priv->regs + REG_CSID);
 +	}
 +
 +	// Just setting the CS
 +	if(bitlen == 0){
 +		if(flags & SPI_XFER_END){
-+			priv->cs_state = 0;
++			priv->cs_asserted = 0;
 +			iowrite32(priv->unused_cs, priv->regs + REG_CSID);
 +			opentitan_qspi_issue_dummy(master, 8, 0);
 +		}
@@ -449,7 +449,7 @@ index 000000000000..6e613f65fdf2
 +	}
 +
 +	if(flags & SPI_XFER_END){
-+		priv->cs_state = 0;
++		priv->cs_asserted = 0;
 +		iowrite32(priv->unused_cs, priv->regs + REG_CSID);
 +	}
 +
@@ -592,8 +592,6 @@ index 000000000000..6e613f65fdf2
 +	// Select correct chip select
 +	priv->used_cs = device->chip_select;
 +
-+	if (device->mode & SPI_CS_HIGH)
-+		dev_err(&master->dev, "SPI_CS_HIGH requested!\r\n");
 +
 +	// Set the correct mode
 +	return opentitan_qspi_set_mode(master, device->mode & 0x3);
@@ -603,16 +601,17 @@ index 000000000000..6e613f65fdf2
 +{
 +	struct opentitan_qspi_priv *priv = spi_master_get_devdata(device->master);
 +
-+	// is_high is the logic level of the CS
-+	if(!is_high) {
-+		priv->cs_state = 1;
++	/* is_high is the logic level of the CS line (not "enable") */
++	priv->cs_asserted = (device->mode & SPI_CS_HIGH) ? is_high : !is_high;
++
++	if (!is_high) {
 +		iowrite32(priv->used_cs, priv->regs + REG_CSID);
 +	} else {
-+		priv->cs_state = 0;
 +		iowrite32(priv->unused_cs, priv->regs + REG_CSID);
 +		opentitan_qspi_issue_dummy(device->master, 8, 0);
 +	}
 +}
++
 +
 +static int opentitan_qspi_transfer_one(struct spi_master *master, struct spi_device *device,
 +									   struct spi_transfer *t)
@@ -646,6 +645,8 @@ index 000000000000..6e613f65fdf2
 +	init_completion(&priv->done);
 +	platform_set_drvdata(pdev, master);
 +	
++	priv->cs_asserted = false;
++	
 +	priv->regs = devm_platform_ioremap_resource(pdev, 0);
 +	if (IS_ERR(priv->regs)) {
 +		ret = PTR_ERR(priv->regs);
@@ -678,9 +679,28 @@ index 000000000000..6e613f65fdf2
 +	if(ret < 0)
 +		priv->max_freq = 400000;	// Default to 400 kHz
 +
-+	// Use first CS by default
-+	priv->unused_cs = 2;
-+    priv->used_cs = 0;
++	/*
++	 * The OpenTitan QSPI IP can optionally provide a "dummy" chip-select
++	 * which is used to deassert all external CS lines (CS outputs are active-low).
++	 * In our HW integration this dummy CS is always the highest index.
++	 *
++	 * DT 'num-cs' describes the number of *external* chip-selects. The dummy
++	 * CSID is inferred as num-cs (i.e. one past the last external CS), and the
++	 * SPI controller is reported as having (num-cs + 1) chip-selects.
++	 */
++	{
++		u32 num_cs = 1;
++		if (!of_property_read_u32(pdev->dev.of_node, "num-cs", &num_cs)) {
++			if (!num_cs) {
++				dev_warn(&pdev->dev, "num-cs is 0, forcing to 1\n");
++				num_cs = 1;
++			}
++		}
++
++		master->num_chipselect = num_cs + 1;
++		priv->unused_cs = num_cs;
++		priv->used_cs = 0;
++	}
 +
 +	// Read the byte order
 +	status = ioread32(priv->regs + REG_STATUS);
@@ -689,8 +709,8 @@ index 000000000000..6e613f65fdf2
 +	/* Define our master */
 +	master->dev.of_node 		= pdev->dev.of_node;
 +	master->bus_num 			= pdev->id;
-+	master->num_chipselect 		= 1;
-+	master->mode_bits 			= SPI_CPHA | SPI_CPOL; // | SPI_CS_HIGH;
++	/* master->num_chipselect set from DT 'num-cs' above */
++	master->mode_bits			= SPI_CPHA | SPI_CPOL | SPI_CS_HIGH;
 +	master->bits_per_word_mask 	= SPI_BPW_MASK(8);
 +	master->max_speed_hz		= priv->max_freq;
 +	master->flags 				= 0;
@@ -756,8 +776,8 @@ index 000000000000..6e613f65fdf2
 +
 +	dev_info(&pdev->dev, "initialized; err_irq = %d, evt_irq = %d, num cs = %d, byte order = %d\r\n",
 +			 err_irq, evt_irq, priv->unused_cs, priv->byte_order);
-+    dev_info(&pdev->dev, "Params: regs = 0x%x, clk_freq = %u, max_freq = %u, cs_state = %u\r\n",
-+             (unsigned int) priv->regs, priv->clk_freq, priv->max_freq, priv->cs_state);
++    dev_info(&pdev->dev, "Params: regs = 0x%x, clk_freq = %u, max_freq = %u, cs_asserted = %u\r\n",
++             (unsigned int) priv->regs, priv->clk_freq, priv->max_freq, priv->cs_asserted);
 +    dev_info(&pdev->dev, "Params: used_cs = %u, unused_cs = %u\r\n", priv->used_cs, priv->unused_cs);
 +    dev_info(&pdev->dev, "Status reg @ 0x%x: 0x%x\r\n", (unsigned int) (priv->regs + REG_STATUS), ioread32(priv->regs + REG_STATUS));
 +
@@ -801,6 +821,3 @@ index 000000000000..6e613f65fdf2
 +MODULE_AUTHOR("PULP Platform <info@pulp-platform.org");
 +MODULE_DESCRIPTION("OpenTitan SPI Host driver");
 +MODULE_LICENSE("GPL");
--- 
-2.16.5
-
