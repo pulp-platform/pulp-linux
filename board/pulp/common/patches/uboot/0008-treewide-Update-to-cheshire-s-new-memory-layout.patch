@@ -1,0 +1,116 @@
+From 17ab4ad11f5476d0c87dd33f9fb203b3ddb7fb29 Mon Sep 17 00:00:00 2001
+From: aottaviano <aottaviano@iis.ee.ethz.ch>
+Date: Sat, 1 Apr 2023 21:08:18 +0200
+Subject: [PATCH 08/15] treewide: Update to cheshire's new memory layout
+
+---
+ arch/riscv/dts/pulp-platform_cheshire.dts | 34 +++++++++++------------
+ board/pulp-platform/cheshire/cheshire.c   |  2 +-
+ 2 files changed, 18 insertions(+), 18 deletions(-)
+
+diff --git a/arch/riscv/dts/pulp-platform_cheshire.dts b/arch/riscv/dts/pulp-platform_cheshire.dts
+index 4f6e7b7443..cc320fb9b6 100644
+--- a/arch/riscv/dts/pulp-platform_cheshire.dts
++++ b/arch/riscv/dts/pulp-platform_cheshire.dts
+@@ -13,7 +13,7 @@
+   compatible = "eth,cheshire-dev";
+   model = "eth,cheshire";
+   chosen {
+-    stdout-path = "/soc/serial@2003000:115200";
++    stdout-path = "/soc/serial@3002000:115200";
+   };
+   memory@80000000 {
+     device_type = "memory";
+@@ -50,35 +50,35 @@
+       reg-names = "control";
+       reg = <0x0 0x0 0x0 0x1000>;
+     };
+-    axi_llc@2001000 {
++    axi_llc@3001000 {
+       compatible = "eth,axi-llc";
+-      reg = <0x0 0x2001000 0x0 0x1000>;
++      reg = <0x0 0x3001000 0x0 0x5000>;
+     };
+-    ddr_link: memory-controller@2002000 {
++    ddr_link: memory-controller@3006000 {
+       compatible = "eth,ddr-link";
+-      reg = <0x0 0x2002000 0x0 0x1000>;
++      reg = <0x0 0x3006000 0x0 0x1000>;
+     };
+-    serial@2003000 {
++    serial@3002000 {
+       compatible = "ns16550a";
+       clock-frequency = <50000000>; // 50 MHz
+       current-speed = <115200>;
+       interrupt-parent = <&PLIC0>;
+       interrupts = <19>;
+-      reg = <0x0 0x2003000 0x0 0x1000>;
++      reg = <0x0 0x3002000 0x0 0x1000>;
+       reg-shift = <2>; // regs are spaced on 32 bit boundary
+       reg-io-width = <4>; // only 32-bit access are supported
+     };
+-    i2c@2004000 {
++    i2c@3003000 {
+       compatible = "eth,i2c";
+       interrupt-parent = <&PLIC0>;
+       interrupts = <1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16>;
+-      reg = <0x0 0x2004000 0x0 0x1000>;
++      reg = <0x0 0x3003000 0x0 0x1000>;
+     };
+-    spi@2005000 {
++    spi@3004000 {
+       compatible = "opentitan,spi-host", "lowrisc,spi";
+       interrupt-parent = <&PLIC0>;
+       interrupts = <17 18>;
+-      reg = <0x0 0x2005000 0x0 0x1000>;
++      reg = <0x0 0x3004000 0x0 0x1000>;
+       clock-frequency = <50000000>;
+       max-frequency = <25000000>;
+       #address-cells = <1>;
+@@ -91,17 +91,17 @@
+         disable-wp;
+       };
+     };
+-    vga@2006000 {
++    vga@3007000 {
+       compatible = "eth,axi-vga";
+-      reg = <0x0 0x2006000 0x0 0x1000>;
++      reg = <0x0 0x3007000 0x0 0x1000>;
+     };
+-    clint@4000000 {
++    clint@2040000 {
+       compatible = "riscv,clint0";
+       interrupts-extended = <&CPU0_intc 3 &CPU0_intc 7>;
+       reg-names = "control";
+-      reg = <0x0 0x4000000 0x0 0x100000>;
++      reg = <0x0 0x2040000 0x0 0x040000>;
+     };
+-    PLIC0: interrupt-controller@c000000 {
++    PLIC0: interrupt-controller@4000000 {
+       compatible = "riscv,plic0";
+       #address-cells = <0>;
+       #interrupt-cells = <1>;
+@@ -109,7 +109,7 @@
+       interrupts-extended = <&CPU0_intc 11 &CPU0_intc 9>;
+       riscv,max-priority = <7>;
+       riscv,ndev = <19>;
+-      reg = <0x0 0xc000000 0x0 0x4000000>;
++      reg = <0x0 0x4000000 0x0 0x4000000>;
+     };
+   };
+ };
+diff --git a/board/pulp-platform/cheshire/cheshire.c b/board/pulp-platform/cheshire/cheshire.c
+index 01aae3df80..94d3147a48 100644
+--- a/board/pulp-platform/cheshire/cheshire.c
++++ b/board/pulp-platform/cheshire/cheshire.c
+@@ -1,6 +1,6 @@
+ #include <init.h>
+ 
+-#define CHESHIRE_AXI_LLC_ADDR 0x02001000
++#define CHESHIRE_AXI_LLC_ADDR 0x03001000
+ 
+ int board_init(void) {
+   volatile unsigned int *axi_llc = (volatile unsigned int *) CHESHIRE_AXI_LLC_ADDR;
+-- 
+2.31.1
+

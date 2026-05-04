@@ -1,0 +1,176 @@
+From c38a5626d67dc446b38920f48d920549da478c6f Mon Sep 17 00:00:00 2001
+From: Christopher Reinwardt <creinwar@ethz.ch>
+Date: Tue, 14 Feb 2023 01:23:58 +0100
+Subject: [PATCH 07/15] Update device tree and config. Configure LLC entirely
+ to cache after relocation to high memory
+
+---
+ arch/riscv/dts/pulp-platform_cheshire.dts | 48 ++++++++++-------------
+ board/pulp-platform/cheshire/cheshire.c   | 13 ++++++
+ configs/pulp-platform_cheshire_defconfig  | 14 +++----
+ 3 files changed, 41 insertions(+), 34 deletions(-)
+
+diff --git a/arch/riscv/dts/pulp-platform_cheshire.dts b/arch/riscv/dts/pulp-platform_cheshire.dts
+index 35f809d62f..4f6e7b7443 100644
+--- a/arch/riscv/dts/pulp-platform_cheshire.dts
++++ b/arch/riscv/dts/pulp-platform_cheshire.dts
+@@ -13,12 +13,8 @@
+   compatible = "eth,cheshire-dev";
+   model = "eth,cheshire";
+   chosen {
+-    stdout-path = "/soc/serial@2000000:115200";
++    stdout-path = "/soc/serial@2003000:115200";
+   };
+-  //memory@70000000 {
+-  //  device_type = "memory";
+-  //  reg = <0x0 0x70000000 0x0 0x00020000>;
+-  //};
+   memory@80000000 {
+     device_type = "memory";
+     reg = <0x0 0x80000000 0x0 0x40000000>;
+@@ -54,33 +50,39 @@
+       reg-names = "control";
+       reg = <0x0 0x0 0x0 0x1000>;
+     };
+-    serial@2000000 {
+-      compatible = "ns16550";
++    axi_llc@2001000 {
++      compatible = "eth,axi-llc";
++      reg = <0x0 0x2001000 0x0 0x1000>;
++    };
++    ddr_link: memory-controller@2002000 {
++      compatible = "eth,ddr-link";
++      reg = <0x0 0x2002000 0x0 0x1000>;
++    };
++    serial@2003000 {
++      compatible = "ns16550a";
+       clock-frequency = <50000000>; // 50 MHz
+       current-speed = <115200>;
+       interrupt-parent = <&PLIC0>;
+       interrupts = <19>;
+-      reg = <0x0 0x2000000 0x0 0x1000>;
++      reg = <0x0 0x2003000 0x0 0x1000>;
+       reg-shift = <2>; // regs are spaced on 32 bit boundary
+       reg-io-width = <4>; // only 32-bit access are supported
+     };
+-    i2c@2001000 {
++    i2c@2004000 {
+       compatible = "eth,i2c";
+       interrupt-parent = <&PLIC0>;
+       interrupts = <1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16>;
+-      reg = <0x0 0x2001000 0x0 0x1000>;
++      reg = <0x0 0x2004000 0x0 0x1000>;
+     };
+-    spi@3000000 {
++    spi@2005000 {
+       compatible = "opentitan,spi-host", "lowrisc,spi";
+       interrupt-parent = <&PLIC0>;
+       interrupts = <17 18>;
+-      reg = <0x0 0x3000000 0x0 0x20000>;
++      reg = <0x0 0x2005000 0x0 0x1000>;
+       clock-frequency = <50000000>;
+       max-frequency = <25000000>;
+-
+       #address-cells = <1>;
+       #size-cells = <0>;
+-
+       mmc@0 {
+         compatible = "mmc-spi-slot";
+         reg = <0>;
+@@ -89,6 +91,10 @@
+         disable-wp;
+       };
+     };
++    vga@2006000 {
++      compatible = "eth,axi-vga";
++      reg = <0x0 0x2006000 0x0 0x1000>;
++    };
+     clint@4000000 {
+       compatible = "riscv,clint0";
+       interrupts-extended = <&CPU0_intc 3 &CPU0_intc 7>;
+@@ -102,20 +108,8 @@
+       interrupt-controller;
+       interrupts-extended = <&CPU0_intc 11 &CPU0_intc 9>;
+       riscv,max-priority = <7>;
+-      riscv,ndev = <20>;
++      riscv,ndev = <19>;
+       reg = <0x0 0xc000000 0x0 0x4000000>;
+     };
+-    ddr_link: memory-controller@20000000 {
+-      compatible = "eth,ddr-link";
+-      reg = <0x0 0x20000000 0x0 0x1000>;
+-    };
+-    rpc_dram: memory-controller@20001000 {
+-      compatible = "eth,rpc-dram";
+-      reg = <0x0 0x20001000 0x0 0x1000>;
+-    };
+-    vga@20002000 {
+-      compatible = "eth,neo-vga";
+-      reg = <0x0 0x20002000 0x0 0x1000>;
+-    };
+   };
+ };
+diff --git a/board/pulp-platform/cheshire/cheshire.c b/board/pulp-platform/cheshire/cheshire.c
+index f2c558dce7..01aae3df80 100644
+--- a/board/pulp-platform/cheshire/cheshire.c
++++ b/board/pulp-platform/cheshire/cheshire.c
+@@ -1,6 +1,19 @@
+ #include <init.h>
+ 
++#define CHESHIRE_AXI_LLC_ADDR 0x02001000
++
+ int board_init(void) {
++  volatile unsigned int *axi_llc = (volatile unsigned int *) CHESHIRE_AXI_LLC_ADDR;
++  // Configure the LLC fully as cache
++  // CFG_SPM_LOW = 0x0
++  axi_llc[0] = 0x0;
++
++  // CFG_SPM_HIGH = 0x0
++  axi_llc[1] = 0x0;
++
++  // COMMIT_CFG = 0x1
++  axi_llc[4] = 0x1;
++
+   return 0;
+ }
+ 
+diff --git a/configs/pulp-platform_cheshire_defconfig b/configs/pulp-platform_cheshire_defconfig
+index adf0ddfce7..e3e4eb6b28 100644
+--- a/configs/pulp-platform_cheshire_defconfig
++++ b/configs/pulp-platform_cheshire_defconfig
+@@ -8,7 +8,7 @@ CONFIG_OF_BOARD_SETUP=y
+ CONFIG_OF_PRIOR_STAGE=y
+ CONFIG_BOOTDELAY=5
+ CONFIG_USE_BOOTCOMMAND=y
+-CONFIG_BOOTCOMMAND="mmc info; mmc read 90000000 80800 5000; bootm 90000000 - $(fdtcontroladdr)"
++CONFIG_BOOTCOMMAND="mmc info; mmc read 90000000 9800 5000; bootm 90000000 - $(fdtcontroladdr)"
+ CONFIG_DISPLAY_CPUINFO=y
+ CONFIG_SPL_SPI_FLASH_MTD=y
+ CONFIG_CMD_GPT=y
+@@ -16,7 +16,7 @@ CONFIG_CMD_GPT=y
+ CONFIG_CMD_MMC=y
+ CONFIG_CMD_MTD=y
+ CONFIG_CMD_PART=y
+-CONFIG_OF_EMBED=y
++CONFIG_OF_EMBED=n
+ CONFIG_MMC=y
+ # CONFIG_MMC_WRITE is not set
+ CONFIG_MMC_SPI=y
+@@ -37,8 +37,8 @@ CONFIG_SPI_FLASH_MTD=y
+ CONFIG_SYS_NS16550=y
+ CONFIG_SPI=y
+ CONFIG_OPENTITAN_QSPI=y
+-CONFIG_LOG=y
+-CONFIG_LOG_MAX_LEVEL=9
+-CONFIG_LOGF_FUNC=y
+-CONFIG_LOG_ERROR_RETURN=y
+-CONFIG_BOOTSTAGE_REPORT=y
+\ No newline at end of file
++#CONFIG_LOG=y
++#CONFIG_LOG_MAX_LEVEL=9
++#CONFIG_LOGF_FUNC=y
++#CONFIG_LOG_ERROR_RETURN=y
++#CONFIG_BOOTSTAGE_REPORT=y
+-- 
+2.31.1
+

@@ -1,0 +1,219 @@
+From 72bafd10d82366cbcf1bf5f8e3ac860ca6b52d21 Mon Sep 17 00:00:00 2001
+From: Christopher Reinwardt <112613867+creinwar@users.noreply.github.com>
+Date: Mon, 7 Nov 2022 16:28:43 +0100
+Subject: [PATCH 06/15] Fix opentitan_qspi.c alignment
+
+---
+ drivers/spi/opentitan_qspi.c | 98 ++++++++++++++++++------------------
+ 1 file changed, 49 insertions(+), 49 deletions(-)
+
+diff --git a/drivers/spi/opentitan_qspi.c b/drivers/spi/opentitan_qspi.c
+index 97d9a8c276..6ba1631ddd 100644
+--- a/drivers/spi/opentitan_qspi.c
++++ b/drivers/spi/opentitan_qspi.c
+@@ -71,13 +71,13 @@ static int opentitan_qspi_of_to_plat(struct udevice *dev)
+ 	if (!plat->regs)
+ 		return -EINVAL;
+ 
+-    // Try to read the peripheral clock frequency
+-    ret = dev_read_u32(dev, "clock-frequency", &plat->clk_freq);
+-    if (ret){
+-        dev_err(dev, "Unable to find clock-frequency for peripheral!\n");
+-	    dev_err(dev, "ret: %d, clk_freq = 0x%x\n", ret, plat->clk_freq);
+-	    return ret;
+-    }
++    	// Try to read the peripheral clock frequency
++    	ret = dev_read_u32(dev, "clock-frequency", &plat->clk_freq);
++    	if (ret){
++        	dev_err(dev, "Unable to find clock-frequency for peripheral!\n");
++	    	dev_err(dev, "ret: %d, clk_freq = 0x%x\n", ret, plat->clk_freq);
++	    	return ret;
++    	}
+   
+ 	// Try to read the max frequency, otherwise just use 500 kHz
+ 	plat->max_freq = dev_read_u32_default(dev, "max-frequency", 500000);
+@@ -97,7 +97,7 @@ static int opentitan_qspi_probe(struct udevice *dev)
+ 
+ 	priv->regs     = plat->regs;
+ 	priv->clk_freq = plat->clk_freq;
+-    priv->max_freq = plat->max_freq;
++    	priv->max_freq = plat->max_freq;
+ 
+ 	// Disable all interrupts
+ 	writel(0, priv->regs + REG_INTR_ENABLE);
+@@ -159,7 +159,7 @@ static int opentitan_qspi_issue_dummy(struct udevice *dev, unsigned int bitlen,
+ 
+     	// Wait for the SPI host to be ready
+     	unsigned int ready_timeout = OPENTITAN_QSPI_READY_TIMEOUT;
+-      unsigned int status = 0;
++      	unsigned int status = 0;
+     	do {
+         	status = readl((volatile unsigned int *) (priv->regs + REG_STATUS));
+         	ready_timeout--;
+@@ -168,7 +168,7 @@ static int opentitan_qspi_issue_dummy(struct udevice *dev, unsigned int bitlen,
+     	if(ready_timeout == 0 && !(status >> 31)){
+         	dev_err(dev, "Ready did not assert. Aborting\r\n");
+         	return -1;
+-      }
++      	}
+ 
+ 	unsigned int command = ((bitlen & 0x1FF) - 1) | ((csaat & 0x1) << 9);
+ 	writel(command, priv->regs + REG_COMMAND);
+@@ -187,7 +187,7 @@ static int opentitan_qspi_issue_dummy(struct udevice *dev, unsigned int bitlen,
+ 
+ // Expects the FIFOs to be empty and returns once the FIFOs are empty again
+ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen,
+-							   const void *dout, void *din, unsigned long flags)
++				      const void *dout, void *din, unsigned long flags)
+ {
+ 	struct udevice *dev = child->parent;
+ 
+@@ -220,10 +220,10 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 	}
+ 
+ 	unsigned int command = 0;
+-    unsigned int status  = 0;
++    	unsigned int status  = 0;
+ 		
+ 	if(dir >> 1){
+-	    unsigned int i = 0;
++	    	unsigned int i = 0;
+ 		// Take care of the word aligned part
+ 		for(; i < num_bytes/4; i++){
+ 			unsigned char tmp[4];
+@@ -235,22 +235,22 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 				tmp[0] = ((unsigned char *) dout)[4*i + 3];
+ 			} else {
+ 				// Read from dout according to its alignment
+-                // 4 byte
+-                if(!((long int) dout & 0x3L)){
+-                    *((unsigned int *) tmp) = *((unsigned int *) (dout+4*i));
++               			// 4 byte
++                		if(!((long int) dout & 0x3L)){
++                    			*((unsigned int *) tmp) = *((unsigned int *) (dout+4*i));
+  
+-                // 2 byte
+-                } else if (!((long int) dout & 0x1L)){
+-                    *((unsigned short *) tmp)     = *((unsigned short *) (dout+4*i));
+-                    *((unsigned short *) (tmp+2)) = *((unsigned short *) (dout+4*i+2));
++                		// 2 byte
++                		} else if (!((long int) dout & 0x1L)){
++                    			*((unsigned short *) tmp)     = *((unsigned short *) (dout+4*i));
++                    			*((unsigned short *) (tmp+2)) = *((unsigned short *) (dout+4*i+2));
+  
+-                // 1 byte
+-                } else {
+-                    tmp[0] = ((unsigned char *) dout)[4*i];
+-                    tmp[1] = ((unsigned char *) dout)[4*i + 1];
+-                    tmp[2] = ((unsigned char *) dout)[4*i + 2];
+-                    tmp[3] = ((unsigned char *) dout)[4*i + 3];
+-                }
++                		// 1 byte
++                		} else {
++                    			tmp[0] = ((unsigned char *) dout)[4*i];
++                    			tmp[1] = ((unsigned char *) dout)[4*i + 1];
++                    			tmp[2] = ((unsigned char *) dout)[4*i + 2];
++                    			tmp[3] = ((unsigned char *) dout)[4*i + 3];
++                		}
+ 			}
+ 
+ 			writel(*((unsigned int *) tmp), priv->regs + REG_DATA);
+@@ -323,22 +323,22 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 								dst[0] = (word >> 24) & 0xFF;
+ 							} else {
+ 								// Store received data into din according to it's alignment
+-                                // 4 byte
+-                                if(!((long int) din & 0x3L)){
+-                                    *((unsigned int *) din) = word;
++                                				// 4 byte
++                                				if(!((long int) din & 0x3L)){
++                                    					*((unsigned int *) din) = word;
+  
+-                                // 2 byte
+-                                } else if (!((long int) din & 0x1L)) {
+-                                    *((unsigned short *) din)   =  word        & 0xFFFF;
+-                                    *((unsigned short *) din+2) = (word >> 16) & 0xFFFF;
++                                				// 2 byte
++                                				} else if (!((long int) din & 0x1L)) {
++                                    					*((unsigned short *) din)   =  word        & 0xFFFF;
++                                    					*((unsigned short *) din+2) = (word >> 16) & 0xFFFF;
+  
+-                                // 1 byte
+-                                } else {
+-                                    dst[0] =  word        & 0xFF;
+-                                    dst[1] = (word >>  8) & 0xFF;
+-                                    dst[2] = (word >> 16) & 0xFF;
+-                                    dst[3] = (word >> 24) & 0xFF;
+-                                }
++                                				// 1 byte
++                                				} else {
++                                    					dst[0] =  word        & 0xFF;
++                                    					dst[1] = (word >>  8) & 0xFF;
++                                    					dst[2] = (word >> 16) & 0xFF;
++                                    					dst[3] = (word >> 24) & 0xFF;
++                                				}
+ 							}
+ 
+ 							din += 4;
+@@ -362,7 +362,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 							} else {
+ 								// We are in here so at least one byte remains
+ 								dst[0] = word & 0xFF;
+-                                bytes_rcvd++;
++                                				bytes_rcvd++;
+ 
+ 								if((num_bytes - bytes_rcvd) >= 1){
+ 									dst[1] = (word >> 8) & 0xFF;
+@@ -417,14 +417,14 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 					}
+ 
+ 					if((num_bytes - bytes_rcvd) == 1){
+-                        dst[3] = word & 0xFF;
++                        			dst[3] = word & 0xFF;
+ 						bytes_rcvd++;
+ 					}
+ 
+ 				} else {
+ 					// We are in here so at least one byte remains
+ 					dst[0] = word & 0xFF;
+-                    bytes_rcvd++;
++                    			bytes_rcvd++;
+ 
+ 					if((num_bytes - bytes_rcvd) >= 1){
+ 						dst[1] = (word >> 8) & 0xFF;
+@@ -437,7 +437,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 					}
+ 
+ 					if((num_bytes - bytes_rcvd) == 1){
+-                        dst[3] = (word >> 24) & 0xFF;
++                        			dst[3] = (word >> 24) & 0xFF;
+ 						bytes_rcvd++;
+ 					}
+ 				}
+@@ -465,7 +465,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ }
+ 
+ static int opentitan_qspi_xfer(struct udevice *dev, unsigned int bitlen,
+-							   const void *dout, void *din, unsigned long flags)
++			       const void *dout, void *din, unsigned long flags)
+ {
+ 	// Yay a single transaction
+ 	if(bitlen <= OPENTITAN_QSPI_FIFO_DEPTH*8){
+@@ -478,11 +478,11 @@ static int opentitan_qspi_xfer(struct udevice *dev, unsigned int bitlen,
+ 		unsigned int  num_txns    = (bitlen + OPENTITAN_QSPI_FIFO_DEPTH*8 - 1)/(OPENTITAN_QSPI_FIFO_DEPTH*8);
+ 		
+ 		for(unsigned int i = 0; i < num_txns; i++){
+-			unsigned long flags = (i == 0) 			? first_flags :
+-								  (i == num_txns-1) ? last_flags  : 0;
++			unsigned long flags = (i == 0) ? first_flags :
++					      (i == num_txns-1) ? last_flags  : 0;
+ 			unsigned int ret = 0;
+ 			unsigned int len = ((bitlen - i*OPENTITAN_QSPI_FIFO_DEPTH*8) < OPENTITAN_QSPI_FIFO_DEPTH*8) ?
+-								(bitlen - i*OPENTITAN_QSPI_FIFO_DEPTH*8) : OPENTITAN_QSPI_FIFO_DEPTH*8;
++					    (bitlen - i*OPENTITAN_QSPI_FIFO_DEPTH*8) : OPENTITAN_QSPI_FIFO_DEPTH*8;
+ 			void const *out = NULL;
+ 			void *in  = NULL;
+ 
+-- 
+2.31.1
+

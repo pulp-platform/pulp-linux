@@ -1,0 +1,37 @@
+From 1c57616d063feceb779154eb6bb36ebf962baa96 Mon Sep 17 00:00:00 2001
+From: Paul Scheffler <paulsc@iis.ee.ethz.ch>
+Date: Tue, 25 Apr 2023 15:35:53 +0200
+Subject: [PATCH 10/15] [FIXME] cheshire: Do not enable LLC for now
+
+---
+ board/pulp-platform/cheshire/cheshire.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/board/pulp-platform/cheshire/cheshire.c b/board/pulp-platform/cheshire/cheshire.c
+index 94d3147a48..a44cc85ac7 100644
+--- a/board/pulp-platform/cheshire/cheshire.c
++++ b/board/pulp-platform/cheshire/cheshire.c
+@@ -3,16 +3,16 @@
+ #define CHESHIRE_AXI_LLC_ADDR 0x03001000
+ 
+ int board_init(void) {
+-  volatile unsigned int *axi_llc = (volatile unsigned int *) CHESHIRE_AXI_LLC_ADDR;
++  //volatile unsigned int *axi_llc = (volatile unsigned int *) CHESHIRE_AXI_LLC_ADDR;
+   // Configure the LLC fully as cache
+   // CFG_SPM_LOW = 0x0
+-  axi_llc[0] = 0x0;
++  //axi_llc[0] = 0x0;
+ 
+   // CFG_SPM_HIGH = 0x0
+-  axi_llc[1] = 0x0;
++  //axi_llc[1] = 0x0;
+ 
+   // COMMIT_CFG = 0x1
+-  axi_llc[4] = 0x1;
++  //axi_llc[4] = 0x1;
+ 
+   return 0;
+ }
+-- 
+2.31.1
+
