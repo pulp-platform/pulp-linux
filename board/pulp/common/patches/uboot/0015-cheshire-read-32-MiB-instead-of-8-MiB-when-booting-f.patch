@@ -17,7 +17,7 @@ index 9d1887a02e..c4274cf121 100644
  CONFIG_USE_BOOTCOMMAND=y
  # Boot with mmc if mmc probes normally, else boot with spi (get CS from "boot-with" in device tree)
 -CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; if mmc info; then fatload mmc 0:4 90000000 uImage; else fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with}; then sf read 90000000 400000 800000; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
-+CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; if mmc info; then fatload mmc 0:4 90000000 uImage; else fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with}; then sf read 90000000 400000 2000000; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
++CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; if mmc info; then part size mmc 0 4 image_size; part start mmc 0 4 image_start; mmc read 0x90000000 0x${image_start} 0x${image_size}; bootm 0x90000000 - ${fdtcontroladdr}; else fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with}; then sf read 90000000 400000 2000000; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
  CONFIG_DISPLAY_CPUINFO=y
  CONFIG_SPL_SPI_FLASH_MTD=y
  CONFIG_CMD_GPT=y

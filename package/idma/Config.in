@@ -1,0 +1,6 @@
+config BR2_PACKAGE_IDMA
+	bool "idma"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Build the Cheshire iDMA DMA engine and proxy drivers as
+	  out-of-tree Linux kernel modules.

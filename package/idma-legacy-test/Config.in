@@ -1,0 +1,7 @@
+config BR2_PACKAGE_IDMA_LEGACY_TEST
+	bool "idma-legacy-test"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_IDMA_LEGACY
+	help
+	  Small userspace program to open /dev/idma_legacy, query the ABI
+	  version, and run an IOCTL memcpy with two user heap buffers.

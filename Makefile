@@ -9,19 +9,33 @@
 MAKEFLAGS += --no-builtin-rules
 .SUFFIXES:
 
-THIS_PATH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+PL_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+
+######################
+# Nonfree components #
+######################
+
+CHS_NONFREE_REMOTE ?= git@iis-git.ee.ethz.ch:pulp-restricted/pulp-linux-nonfree.git
+CHS_NONFREE_COMMIT ?= 856f45291a2c186d2e3a78ae2f0d4a9f97b8faec
+
+.PHONY: nonfree-init
+nonfree-init:
+	git clone $(CHS_NONFREE_REMOTE) $(PL_ROOT)/nonfree
+	cd $(PL_ROOT)/nonfree && git checkout $(CHS_NONFREE_COMMIT)
+
+-include $(PL_ROOT)/nonfree/nonfree.mk
 
 #
 # Buildroot external output folder
 #
 
-OUTPUT_BASEDIR = $(THIS_PATH)/output
+OUTPUT_BASEDIR = $(PL_ROOT)/output
 OUTPUT_BOARDNAME = $(basename $(notdir $@))
 OUTPUT_DIR = $(OUTPUT_BASEDIR)/$(OUTPUT_BOARDNAME)
 
-MAKE_BUILDROOT = $(MAKE) -C $(THIS_PATH)/buildroot BR2_EXTERNAL=$(THIS_PATH)
+MAKE_BUILDROOT = $(MAKE) -C $(PL_ROOT)/buildroot BR2_EXTERNAL=$(PL_ROOT)
 
-output/% $(OUTPUT_BASEDIR)/%: $(THIS_PATH)/configs/%_defconfig
+output/% $(OUTPUT_BASEDIR)/%: $(PL_ROOT)/configs/%_defconfig
 		$(MAKE_BUILDROOT) O=$(OUTPUT_DIR) $(basename $(notdir $@))_defconfig
 		# sed -i /^BR2_DL_DIR=.*/s%%BR2_DL_DIR=$(BR2_DL_DIR)% $(OUTPUT_DIR)/.config
 
@@ -36,7 +50,11 @@ DTC = dtc
 
 .PHONY: setup
 setup: target/cheshire/cheshire.dtb
-	$(MAKE) -C buildroot BR2_EXTERNAL=.. cheshire_defconfig
+	$(MAKE_BUILDROOT) cheshire_defconfig
+
+.PHONY: setup-%
+setup-%: target/cheshire/cheshire.dtb
+	$(MAKE_BUILDROOT) $*_defconfig
 
 
 .PHONY: clean
