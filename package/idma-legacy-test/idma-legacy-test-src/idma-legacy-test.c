@@ -4,22 +4,21 @@
  * Userspace test for the idma-legacy character device (IOCTL MEMCPY).
  */
 
-#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "idma-legacy-ioctl.h"
 
-bool zicbom_supported = false;
+#ifndef IDMA_LEGACY_TEST_EXPECT_CMO
+#define IDMA_LEGACY_TEST_EXPECT_CMO 0
+#endif
 
 static void usage(const char *argv0) {
   fprintf(stderr,
@@ -36,33 +35,6 @@ static uint64_t mix_hash(uint64_t x) {
   x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
   x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
   return x ^ (x >> 31);
-}
-
-static void sigill_handler(int sig, siginfo_t *info, void *context) {
-  (void)sig;
-  (void)info;
-  (void)context;
-  //zicbom_supported = false;
-}
-
-static void discover_zicbom_support(void) {
-  int rc;
-  char ch[16];
-  struct sigaction act = {
-      .sa_sigaction = &sigill_handler,
-      .sa_flags = SA_SIGINFO,
-  };
-  struct sigaction old_act;
-
-  rc = sigaction(SIGILL, &act, &old_act);
-  assert(rc == 0);
-
-  zicbom_supported = true;
-
-  asm volatile("cbo.flush (%[ch])" : : [ch] "r"(ch) : "memory");
-  // asm volatile("cbo.zero (%[ch])" : : [ch] "r"(ch) : "memory");
-
-  sigaction(SIGILL, &old_act, NULL);
 }
 
 /* Zicbom cache block size for Cheshire / this test platform */
@@ -182,8 +154,6 @@ int main(int argc, char **argv) {
     seed = sv;
   }
 
-  discover_zicbom_support();
-
   fd = open(path, O_RDWR);
   if (fd < 0) {
     perror(path);
@@ -208,30 +178,30 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  if (zicbom_supported) {
-    printf("Testing CMO flushing...");
-    ret = test_idma_legacy(fd, src, dst, length, seed, true);
-    if (ret == 0) {
-      printf("OK\n");
-    } else {
-      printf("FAILED\n");
-    }
-    printf("Testing only fence (no flush expected)...");
-    ret = test_idma_legacy(fd, src, dst, length, seed, false);
-    if (ret > 0) {
-      printf("OK\n");
-    } else {
-      printf("FAILED\n");
-    }
+#if IDMA_LEGACY_TEST_EXPECT_CMO
+  printf("Testing CMO flushing...");
+  ret = test_idma_legacy(fd, src, dst, length, seed, true);
+  if (ret == 0) {
+    printf("OK\n");
   } else {
-    printf("Testing fence flushing...");
-    ret = test_idma_legacy(fd, src, dst, length, seed, false);
-    if (ret == 0) {
-      printf("OK\n");
-    } else {
-      printf("FAILED\n");
-    }
+    printf("FAILED\n");
   }
+  printf("Testing only fence (no flush expected)...");
+  ret = test_idma_legacy(fd, src, dst, length, seed, false);
+  if (ret > 0) {
+    printf("OK\n");
+  } else {
+    printf("FAILED\n");
+  }
+#else
+  printf("Testing fence flushing...");
+  ret = test_idma_legacy(fd, src, dst, length, seed, false);
+  if (ret == 0) {
+    printf("OK\n");
+  } else {
+    printf("FAILED\n");
+  }
+#endif
 
   free(src);
   free(dst);
