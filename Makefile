@@ -16,7 +16,7 @@ PL_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ######################
 
 CHS_NONFREE_REMOTE ?= git@iis-git.ee.ethz.ch:chency/pulp-linux-nonfree.git
-CHS_NONFREE_COMMIT ?= 8c44d51
+CHS_NONFREE_COMMIT ?= ba14962
 
 .PHONY: nonfree-init
 nonfree-init:
