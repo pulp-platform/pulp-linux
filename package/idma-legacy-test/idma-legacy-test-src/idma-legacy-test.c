@@ -118,7 +118,7 @@ int test_idma_legacy(const int fd, void *src, void *dst, size_t length, uint64_t
 
 int main(int argc, char **argv) {
   const char *path = "/dev/idma_legacy";
-  size_t length = 4096;
+  size_t length = 0x1000;
   uint64_t seed = 0;
   int fd = -1;
   void *src = NULL;
@@ -168,8 +168,8 @@ int main(int argc, char **argv) {
   }
   printf("idma-legacy ABI version: %u\n", ver);
 
-  src = malloc(length);
-  dst = malloc(length);
+  src = aligned_alloc(0x1000, length);
+  dst = aligned_alloc(0x1000, length);
   if (!src || !dst) {
     fprintf(stderr, "malloc failed\n");
     free(src);
@@ -179,14 +179,14 @@ int main(int argc, char **argv) {
   }
 
 #if IDMA_LEGACY_TEST_EXPECT_CMO
-  printf("Testing CMO flushing...");
+  printf("Testing CMO flushing...\n");
   ret = test_idma_legacy(fd, src, dst, length, seed, true);
   if (ret == 0) {
     printf("OK\n");
   } else {
     printf("FAILED\n");
   }
-  printf("Testing only fence (no flush expected)...");
+  printf("Testing only fence (no flush expected)...\n");
   ret = test_idma_legacy(fd, src, dst, length, seed, false);
   if (ret > 0) {
     printf("OK\n");

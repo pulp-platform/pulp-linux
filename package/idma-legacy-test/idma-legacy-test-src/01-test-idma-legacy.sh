@@ -1,5 +1,5 @@
 #!/bin/sh
 
-insmod /lib/modules/$(uname -r)/updates/idma-legacy.ko
+# insmod /lib/modules/$(uname -r)/updates/idma-legacy.ko
 
-/root/idma-legacy-test /dev/idma_legacy 10000 1
+# /root/idma-legacy-test /dev/idma_legacy 10000 1

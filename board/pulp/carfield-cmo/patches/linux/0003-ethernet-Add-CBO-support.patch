@@ -1,0 +1,213 @@
+From 1d7f9294e7df387697148f7d7b59ad439dad1b83 Mon Sep 17 00:00:00 2001
+From: Cyril Koenig <cyril27koenig@gmail.com>
+Date: Wed, 27 May 2026 00:28:48 +0200
+Subject: [PATCH] ethernet: Add CBO support
+
+---
+ drivers/net/ethernet/xilinx/Makefile          |   4 +
+ .../net/ethernet/xilinx/xilinx_axienet_main.c | 102 ++++++++++++++++++
+ 2 files changed, 106 insertions(+)
+
+diff --git a/drivers/net/ethernet/xilinx/Makefile b/drivers/net/ethernet/xilinx/Makefile
+index 7d7dc1771..ec61107b9 100644
+--- a/drivers/net/ethernet/xilinx/Makefile
++++ b/drivers/net/ethernet/xilinx/Makefile
+@@ -8,3 +8,7 @@ obj-$(CONFIG_XILINX_LL_TEMAC) += ll_temac.o
+ obj-$(CONFIG_XILINX_EMACLITE) += xilinx_emaclite.o
+ xilinx_emac-objs := xilinx_axienet_main.o xilinx_axienet_mdio.o
+ obj-$(CONFIG_XILINX_AXI_EMAC) += xilinx_emac.o
++
++# Zicbom needed for cbo.* inline asm in axienet driver (non-coherent DMA)
++xilinx_axienet_zicbom_march := $(call cc-option,-march=rv64imafdc_zicsr_zifencei_zicbom)
++CFLAGS_xilinx_axienet_main.o += $(xilinx_axienet_zicbom_march)
+diff --git a/drivers/net/ethernet/xilinx/xilinx_axienet_main.c b/drivers/net/ethernet/xilinx/xilinx_axienet_main.c
+index 0073441ee..2d90b3437 100644
+--- a/drivers/net/ethernet/xilinx/xilinx_axienet_main.c
++++ b/drivers/net/ethernet/xilinx/xilinx_axienet_main.c
+@@ -54,6 +54,83 @@
+ #define DRIVER_VERSION		"1.00a"
+ 
+ #define AXIENET_REGS_N		40
++#define ZICBOM_BLOCK_SZ		16
++
++#if ZICBOM_BLOCK_SZ == 0
++static void zicbom_flush_range(unsigned long base, unsigned long len)
++{
++	mb();
++}
++
++static void zicbom_inval_range(unsigned long base, unsigned long len)
++{
++	mb();
++}
++#else
++static void zicbom_flush_range(unsigned long base, unsigned long len)
++{
++	unsigned long p = base & ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++	unsigned long e = (base + len + ZICBOM_BLOCK_SZ - 1) &
++			  ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++
++	asm volatile("bgeu %[p], %[e], 2f\n\t"
++		     "1:\n\t"
++		     "cbo.flush (%[p])\n\t"
++		     "addi %[p], %[p], %[step]\n\t"
++		     "bltu %[p], %[e], 1b\n"
++		     "2:"
++		     : [p] "+&r"(p)
++		     : [e] "r"(e), [step] "I"(ZICBOM_BLOCK_SZ)
++		     : "memory");
++}
++
++static void zicbom_inval_range(unsigned long base, unsigned long len)
++{
++	unsigned long p = base & ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++	unsigned long e = (base + len + ZICBOM_BLOCK_SZ - 1) &
++			  ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++
++	asm volatile("bgeu %[p], %[e], 2f\n\t"
++		     "1:\n\t"
++		     "cbo.inval (%[p])\n\t"
++		     "addi %[p], %[p], %[step]\n\t"
++		     "bltu %[p], %[e], 1b\n"
++		     "2:"
++		     : [p] "+&r"(p)
++		     : [e] "r"(e), [step] "I"(ZICBOM_BLOCK_SZ)
++		     : "memory");
++}
++#endif
++
++static void axienet_bd_flush(struct axidma_bd *bd)
++{
++	zicbom_flush_range((unsigned long)bd, sizeof(*bd));
++}
++
++static void axienet_bd_inval(struct axidma_bd *bd)
++{
++	zicbom_inval_range((unsigned long)bd, sizeof(*bd));
++}
++
++static void axienet_bd_flush_ring(struct axidma_bd *bd, u32 num_bd)
++{
++	zicbom_flush_range((unsigned long)bd, sizeof(*bd) * num_bd);
++}
++
++static void axienet_bd_inval_ring(struct axidma_bd *bd, u32 num_bd)
++{
++	zicbom_inval_range((unsigned long)bd, sizeof(*bd) * num_bd);
++}
++
++static void axienet_buf_flush(const void *buf, size_t len)
++{
++	zicbom_flush_range((unsigned long)buf, len);
++}
++
++static void axienet_buf_inval(const void *buf, size_t len)
++{
++	zicbom_inval_range((unsigned long)buf, len);
++}
+ 
+ /* Match table for of_platform binding */
+ static const struct of_device_id axienet_of_match[] = {
+@@ -231,6 +308,10 @@ static u32 axienet_usec_to_timer(struct axienet_local *lp, u32 coalesce_usec)
+  */
+ static void axienet_dma_start(struct axienet_local *lp)
+ {
++	/* Ensure ring writes are visible before DMA sees CDESC/TDESC. */
++	axienet_bd_flush_ring(lp->rx_bd_v, lp->rx_bd_num);
++	axienet_bd_flush_ring(lp->tx_bd_v, lp->tx_bd_num);
++
+ 	/* Start updating the Rx channel control register */
+ 	lp->rx_dma_cr = (lp->coalesce_count_rx << XAXIDMA_COALESCE_SHIFT) |
+ 			XAXIDMA_IRQ_IOC_MASK | XAXIDMA_IRQ_ERROR_MASK;
+@@ -337,6 +418,7 @@ static int axienet_dma_bd_init(struct net_device *ndev)
+ 			netdev_err(ndev, "DMA mapping error\n");
+ 			goto out;
+ 		}
++		axienet_buf_inval(skb->data, lp->max_frm_size);
+ 		desc_set_phys_addr(lp, addr, &lp->rx_bd_v[i]);
+ 
+ 		lp->rx_bd_v[i].cntrl = lp->max_frm_size;
+@@ -663,6 +745,8 @@ static int axienet_free_tx_chain(struct axienet_local *lp, u32 first_bd,
+ 
+ 	for (i = 0; i < nr_bds; i++) {
+ 		cur_p = &lp->tx_bd_v[(first_bd + i) % lp->tx_bd_num];
++		if (!force)
++			axienet_bd_inval(cur_p);
+ 		status = cur_p->status;
+ 
+ 		/* If force is not specified, clean up only descriptors
+@@ -800,6 +884,7 @@ axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 	u32 orig_tail_ptr, new_tail_ptr;
+ 	struct axienet_local *lp = netdev_priv(ndev);
+ 	struct axidma_bd *cur_p;
++	int bd_count;
+ 
+ 	orig_tail_ptr = lp->tx_bd_tail;
+ 	new_tail_ptr = orig_tail_ptr;
+@@ -874,6 +959,16 @@ axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 	WRITE_ONCE(lp->tx_bd_tail, new_tail_ptr);
+ 
+ 	/* Start the transfer */
++	axienet_buf_flush(skb->data, skb_headlen(skb));
++	for (ii = 0; ii < num_frag; ii++) {
++		frag = &skb_shinfo(skb)->frags[ii];
++		axienet_buf_flush(skb_frag_address(frag), skb_frag_size(frag));
++	}
++	for (bd_count = 0; bd_count <= num_frag; bd_count++) {
++		u32 bd = (orig_tail_ptr + bd_count) % lp->tx_bd_num;
++
++		axienet_bd_flush(&lp->tx_bd_v[bd]);
++	}
+ 	axienet_dma_out_addr(lp, XAXIDMA_TX_TDESC_OFFSET, tail_p);
+ 
+ 	/* Stop queue if next transmit may not have space */
+@@ -910,6 +1005,7 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
+ 	struct axienet_local *lp = container_of(napi, struct axienet_local, napi_rx);
+ 
+ 	cur_p = &lp->rx_bd_v[lp->rx_bd_ci];
++	axienet_bd_inval(cur_p);
+ 
+ 	while (packets < budget && (cur_p->status & XAXIDMA_BD_STS_COMPLETE_MASK)) {
+ 		dma_addr_t phys;
+@@ -931,6 +1027,7 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
+ 			phys = desc_get_phys_addr(lp, cur_p);
+ 			dma_unmap_single(lp->dev, phys, lp->max_frm_size,
+ 					 DMA_FROM_DEVICE);
++			axienet_buf_inval(skb->data, lp->max_frm_size);
+ 
+ 			skb_put(skb, length);
+ 			skb->protocol = eth_type_trans(skb, lp->ndev);
+@@ -971,11 +1068,13 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
+ 			dev_kfree_skb(new_skb);
+ 			break;
+ 		}
++		axienet_buf_inval(new_skb->data, lp->max_frm_size);
+ 		desc_set_phys_addr(lp, phys, cur_p);
+ 
+ 		cur_p->cntrl = lp->max_frm_size;
+ 		cur_p->status = 0;
+ 		cur_p->skb = new_skb;
++		axienet_bd_flush(cur_p);
+ 
+ 		/* Only update tail_p to mark this slot as usable after it has
+ 		 * been successfully refilled.
+@@ -985,6 +1084,7 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
+ 		if (++lp->rx_bd_ci >= lp->rx_bd_num)
+ 			lp->rx_bd_ci = 0;
+ 		cur_p = &lp->rx_bd_v[lp->rx_bd_ci];
++		axienet_bd_inval(cur_p);
+ 	}
+ 
+ 	u64_stats_update_begin(&lp->rx_stat_sync);
+@@ -1766,6 +1866,8 @@ static void axienet_dma_err_handler(struct work_struct *work)
+ 			   ~(XAE_OPTION_TXEN | XAE_OPTION_RXEN));
+ 
+ 	axienet_dma_stop(lp);
++	axienet_bd_inval_ring(lp->tx_bd_v, lp->tx_bd_num);
++	axienet_bd_inval_ring(lp->rx_bd_v, lp->rx_bd_num);
+ 
+ 	for (i = 0; i < lp->tx_bd_num; i++) {
+ 		cur_p = &lp->tx_bd_v[i];
+-- 
+2.31.1
+
