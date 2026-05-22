@@ -1,17 +1,17 @@
-From 43e8fa4ccd38bc419ee4d8a662eef0e18ddd6088 Mon Sep 17 00:00:00 2001
+From 60259b7bd823bda8cbfcefae54cde69b47cb8033 Mon Sep 17 00:00:00 2001
 From: Cyril Koenig <cyril27koenig@gmail.com>
 Date: Thu, 21 May 2026 00:15:01 +0200
 Subject: [PATCH] Add Xilinx PHY drivers
 
 ---
- configs/pulp-platform_cheshire_defconfig | 35 +++++++++++-------------
- 1 file changed, 16 insertions(+), 19 deletions(-)
+ configs/pulp-platform_cheshire_defconfig | 38 +++++++++++-------------
+ 1 file changed, 18 insertions(+), 20 deletions(-)
 
 diff --git a/configs/pulp-platform_cheshire_defconfig b/configs/pulp-platform_cheshire_defconfig
-index 17c9076a..0489a5b1 100644
+index 17c9076a..6c37e5a9 100644
 --- a/configs/pulp-platform_cheshire_defconfig
 +++ b/configs/pulp-platform_cheshire_defconfig
-@@ -3,35 +3,33 @@ CONFIG_DEFAULT_DEVICE_TREE="pulp-platform_cheshire"
+@@ -3,35 +3,34 @@ CONFIG_DEFAULT_DEVICE_TREE="pulp-platform_cheshire"
  CONFIG_TARGET_PULP_PLATFORM_CHESHIRE=y
  CONFIG_ARCH_RV64I=y
  CONFIG_RISCV_SMODE=y
@@ -25,7 +25,8 @@ index 17c9076a..0489a5b1 100644
 -CONFIG_SF_DEFAULT_MODE=0
 -CONFIG_SF_DEFAULT_SPEED=25000000
 -# Boot with mmc if mmc probes normally, else boot with spi (get CS from "boot-with" in device tree)
- CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; setexpr.l boot_src *0x03000040; if test ${boot_src} -eq 1; then part size mmc 0 4 image_size; part start mmc 0 4 image_start; mmc read 0x90000000 0x${image_start} 0x${image_size}; bootm 0x90000000 - ${fdtcontroladdr}; else if test ${boot_src} -eq 2; then fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with} 25000000; then mtd read nor1 90000000 400000 800000; fi; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
+-CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; setexpr.l boot_src *0x03000040; if test ${boot_src} -eq 1; then part size mmc 0 4 image_size; part start mmc 0 4 image_start; mmc read 0x90000000 0x${image_start} 0x${image_size}; bootm 0x90000000 - ${fdtcontroladdr}; else if test ${boot_src} -eq 2; then fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with} 25000000; then mtd read nor1 90000000 400000 800000; fi; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
++CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; setexpr.l boot_src *0x03000040; if fdt get value remote-boot /soc/eth0 remote-boot; then dhcp 0x90000000 ${remote-boot}; elif test ${boot_src} -eq 1; then part size mmc 0 4 image_size; part start mmc 0 4 image_start; mmc read 0x90000000 0x${image_start} 0x${image_size}; else fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with} 25000000; then mtd read nor1 90000000 400000 800000; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
 +CONFIG_LOGLEVEL=9
 +CONFIG_LOG=y
 +CONFIG_LOG_MAX_LEVEL=9
@@ -42,6 +43,7 @@ index 17c9076a..0489a5b1 100644
 -# CONFIG_MMC_WRITE is not set
 -CONFIG_MMC_SPI=y
 -CONFIG_DM_MTD=y
++CONFIG_CMD_DHCP=y
  CONFIG_CMD_FAT=y
  CONFIG_MTDIDS_DEFAULT="nor0=spi0.0"
  CONFIG_MTDPARTS_DEFAULT="mtdparts=spi0.0:-(all)"
@@ -58,7 +60,7 @@ index 17c9076a..0489a5b1 100644
  CONFIG_SPI_FLASH_ATMEL=y
  CONFIG_SPI_FLASH_EON=y
  CONFIG_SPI_FLASH_GIGADEVICE=y
-@@ -44,12 +42,11 @@ CONFIG_SPI_FLASH_WINBOND=y
+@@ -44,12 +43,11 @@ CONFIG_SPI_FLASH_WINBOND=y
  CONFIG_SPI_FLASH_XMC=y
  # CONFIG_SPI_FLASH_USE_4K_SECTORS is not set
  CONFIG_SPI_FLASH_MTD=y
@@ -77,5 +79,5 @@ index 17c9076a..0489a5b1 100644
 -#CONFIG_LOG_ERROR_RETURN=y
 -#CONFIG_BOOTSTAGE_REPORT=y
 -- 
-2.39.3
+2.31.1
 

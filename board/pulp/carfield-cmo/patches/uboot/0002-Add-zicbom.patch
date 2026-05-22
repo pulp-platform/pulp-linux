@@ -1,0 +1,87 @@
+From 8641739f5fcfacc88523838f7844a025568d6ee2 Mon Sep 17 00:00:00 2001
+From: Cyril Koenig <cyril27koenig@gmail.com>
+Date: Fri, 22 May 2026 21:12:54 +0200
+Subject: [PATCH] Add zicbom
+
+---
+ arch/riscv/Makefile    |  2 +-
+ arch/riscv/lib/cache.c | 36 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/arch/riscv/Makefile b/arch/riscv/Makefile
+index 7814d02b..60109b58 100644
+--- a/arch/riscv/Makefile
++++ b/arch/riscv/Makefile
+@@ -24,7 +24,7 @@ ifeq ($(CONFIG_CMODEL_MEDANY),y)
+ 	CMODEL = medany
+ endif
+ 
+-ARCH_FLAGS = -march=$(ARCH_BASE)$(ARCH_A)$(ARCH_C)_zicsr_zifencei -mabi=$(ABI) \
++ARCH_FLAGS = -march=$(ARCH_BASE)$(ARCH_A)$(ARCH_C)_zicsr_zifencei_zicbom -mabi=$(ABI) \
+ 	     -mcmodel=$(CMODEL)
+ 
+ PLATFORM_CPPFLAGS	+= $(ARCH_FLAGS)
+diff --git a/arch/riscv/lib/cache.c b/arch/riscv/lib/cache.c
+index b1d42bcc..c79ee54a 100644
+--- a/arch/riscv/lib/cache.c
++++ b/arch/riscv/lib/cache.c
+@@ -7,6 +7,40 @@
+ #include <common.h>
+ #include <cpu_func.h>
+ 
++#define ZICBOM_BLOCK_SZ 16
++
++static void zicbom_flush_range(unsigned long base, unsigned long len) {
++  unsigned long p = (unsigned long)base & ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++  unsigned long e = ((unsigned long)base + len + ZICBOM_BLOCK_SZ - 1) &
++                ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++
++  asm volatile("bgeu %[p], %[e], 2f\n\t"
++               "1:\n\t"
++               "cbo.flush (%[p])\n\t"
++               "addi %[p], %[p], %[step]\n\t"
++               "bltu %[p], %[e], 1b\n"
++               "2:"
++               : [p] "+&r"(p)
++               : [e] "r"(e), [step] "I"(ZICBOM_BLOCK_SZ)
++               : "memory");
++}
++
++static void zicbom_inval_range(unsigned long base, unsigned long len) {
++  unsigned long p = (unsigned long)base & ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++  unsigned long e = ((unsigned long)base + len + ZICBOM_BLOCK_SZ - 1) &
++                ~(unsigned long)(ZICBOM_BLOCK_SZ - 1);
++
++  asm volatile("bgeu %[p], %[e], 2f\n\t"
++               "1:\n\t"
++               "cbo.inval (%[p])\n\t"
++               "addi %[p], %[p], %[step]\n\t"
++               "bltu %[p], %[e], 1b\n"
++               "2:"
++               : [p] "+&r"(p)
++               : [e] "r"(e), [step] "I"(ZICBOM_BLOCK_SZ)
++               : "memory");
++}
++
+ void invalidate_icache_all(void)
+ {
+ 	asm volatile ("fence.i" ::: "memory");
+@@ -18,6 +52,7 @@ __weak void flush_dcache_all(void)
+ 
+ __weak void flush_dcache_range(unsigned long start, unsigned long end)
+ {
++	zicbom_flush_range(start, end-start);
+ }
+ 
+ void invalidate_icache_range(unsigned long start, unsigned long end)
+@@ -31,6 +66,7 @@ void invalidate_icache_range(unsigned long start, unsigned long end)
+ 
+ __weak void invalidate_dcache_range(unsigned long start, unsigned long end)
+ {
++	zicbom_inval_range(start, end-start);
+ }
+ 
+ void cache_flush(void)
+-- 
+2.31.1
+

@@ -46,7 +46,7 @@ static int idma_legacy_map_mmio(void) {
     return -ENODEV;
 
   if (of_address_to_resource(np, 0, &res) == 0)
-    pr_info("idma-legacy: iDMA regs %pR (from device tree)\n", &res);
+    pr_info("idma-legacy: iDMA regs %px (from device tree)\n", &res);
 
   idma_legacy_mmio = of_iomap(np, 0);
   of_node_put(np);
@@ -91,13 +91,14 @@ static int idma_legacy_submit_and_wait(void __iomem *regs, u64 dst_addr,
     return 0;
 
   pr_info("idma-legacy: submitting transfer %llu bytes from %llx to %llx\n",
-           len, src_addr, dst_addr);
+          len, src_addr, dst_addr);
   pr_info("idma-legacy: writing to register addresses:\n"
-           "src_addr: %llx\n"
-           "dst_addr: %llx\n"
-           "len_addr: %llx\n"
-           "conf: %llx\n",
-           DMA_SRC_ADDR(regs), DMA_DST_ADDR(regs), DMA_NUMBYTES_ADDR(regs), conf);
+          "src_addr: %px <- %llx\n"
+          "dst_addr: %px <- %llx\n"
+          "len_addr: %px <- %llx\n"
+          "conf: %px <- %x\n",
+          DMA_SRC_ADDR(regs), src_addr, DMA_DST_ADDR(regs), dst_addr,
+          DMA_NUMBYTES_ADDR(regs), len, DMA_CONF_ADDR(regs), conf);
 
   writeq(src_addr, DMA_SRC_ADDR(regs));
   writeq(dst_addr, DMA_DST_ADDR(regs));
@@ -105,7 +106,6 @@ static int idma_legacy_submit_and_wait(void __iomem *regs, u64 dst_addr,
   wmb();
   writel(conf, DMA_CONF_ADDR(regs));
   wmb();
-
 
   xfer_id = readw(DMA_NEXT_ID_ADDR(regs));
 
@@ -132,6 +132,15 @@ static int legacy_dma_memcpy(void __iomem *regs, void __user *udst,
 
   if (!regs)
     return -ENODEV;
+
+  if ((uintptr_t)udst & 0xfff || (uintptr_t)usrc & 0xfff || size & 0xfff) {
+    pr_err("idma-legacy: dst src size is not aligned to 0x1000:"
+           "dst: %px,\n"
+           "src: %px,\n"
+           "size: %zu\n",
+           udst, usrc, size);
+    return -EINVAL;
+  }
 
   while (done < size) {
     unsigned long s_addr = (unsigned long)usrc + done;
