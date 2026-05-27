@@ -4,20 +4,21 @@
 #
 ################################################################################
 
-VITETRIS_VERSION = 0.58.0-a922c8b
-VITETRIS_LICENSE = BSD-2-Clause
-VITETRIS_LICENSE_FILES = COPYING
-VITETRIS_SITE = "$(BR2_EXTERNAL_CVA6_LINUX_PATH)/package/vitetris/vitetris-src"
-VITETRIS_SITE_METHOD = local
+VITETRIS_VERSION = 0.57
+VITETRIS_SITE = http://www.victornils.net/tetris/
+VITETRIS_LICENSE = BSD
+VITETRIS_LICENSE_FILES = licence.txt
+
+define VITETRIS_CONFIGURE_CMDS
+    (cd $(@D) && ./configure)
+endef
 
 define VITETRIS_BUILD_CMDS
-    cd $(@D) && ./configure CC="$(TARGET_CC)"
-    $(MAKE) -C $(@D)
+    $(TARGET_MAKE_ENV) $(MAKE) CC="$(TARGET_CC)" -C $(@D)
 endef
 
 define VITETRIS_INSTALL_TARGET_CMDS
-    $(INSTALL) -D -m 0755 $(@D)/tetris $(TARGET_DIR)/usr/bin
+    $(TARGET_MAKE_ENV) $(MAKE) PREFIX=$(TARGET_DIR)/usr -C $(@D) install
 endef
-
 
 $(eval $(generic-package))
