@@ -11,6 +11,19 @@ MAKEFLAGS += --no-builtin-rules
 
 PL_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
+#
+# Nonfree components (CI)
+#
+
+CHS_NONFREE_REMOTE ?= git@iis-git.ee.ethz.ch:chency/pulp-linux-nonfree.git
+CHS_NONFREE_COMMIT ?= ba14962
+
+.PHONY: nonfree-init
+nonfree-init:
+	git clone $(CHS_NONFREE_REMOTE) $(PL_ROOT)/nonfree
+	cd $(PL_ROOT)/nonfree && git checkout $(CHS_NONFREE_COMMIT)
+
+-include $(PL_ROOT)/nonfree/nonfree.mk
 
 #
 # Buildroot external output folder
