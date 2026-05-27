@@ -1,0 +1,111 @@
+From edd5bb35867b51e734e0cffadd8b66781d8b8064 Mon Sep 17 00:00:00 2001
+From: Paul Scheffler <paulsc@iis.ee.ethz.ch>
+Date: Tue, 25 Apr 2023 18:03:09 +0200
+Subject: [PATCH 11/15] [FIXME] cheshire: Patch existing opentitan-qspi driver
+
+---
+ drivers/spi/opentitan_qspi.c | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/spi/opentitan_qspi.c b/drivers/spi/opentitan_qspi.c
+index 6ba1631ddd..7c76abcd68 100644
+--- a/drivers/spi/opentitan_qspi.c
++++ b/drivers/spi/opentitan_qspi.c
+@@ -11,14 +11,16 @@
+ #define MIN(a,b) ((a <= b) ? a : b)
+ 
+ // Bit 30 in Control: SW Reset
++#define OPENTITAN_QSPI_CONTROL_SPI_EN (1 << 31)
+ #define OPENTITAN_QSPI_CONTROL_SW_RESET (1 << 30)
++#define OPENTITAN_QSPI_CONTROL_OUTPUT_EN (1 << 29)
+ 
+ #define OPENTITAN_QSPI_TXFIFO_DEPTH 256
+ #define OPENTITAN_QSPI_RXFIFO_DEPTH 256
+ #define OPENTITAN_QSPI_FIFO_DEPTH MIN(OPENTITAN_QSPI_TXFIFO_DEPTH, OPENTITAN_QSPI_RXFIFO_DEPTH)
+ 
+ #define OPENTITAN_QSPI_CS_USED 0
+-#define OPENTITAN_QSPI_CS_UNUSED 1
++#define OPENTITAN_QSPI_CS_UNUSED 2
+ 
+ #define OPENTITAN_QSPI_READY_TIMEOUT 10000
+ #define OPENTITAN_QSPI_READ_TIMEOUT 10000
+@@ -33,9 +35,11 @@ enum opentitan_qspi_regs {
+ 	REG_STATUS,			/* Status Register */
+ 	REG_CONFIGOPTS_0,	/* Configuration Options Register 1 */
+ 	REG_CONFIGOPTS_1,   /* Configuration Options Register 2 */
++	REG_CONFIGOPTS_2,   /* Configuration Options Register 3 */
+ 	REG_CSID,			/* Chip-Select ID */
+ 	REG_COMMAND,		/* Command Register */
+-	REG_DATA,			/* SPI Data Window*/
++	REG_RXDATA,			/* SPI RX Data Window*/
++	REG_TXDATA,			/* SPI TX Data Window*/
+ 	REG_ERROR_ENABLE,	/* Controls which classes of error raise an interrupt */
+ 	REG_ERROR_STATUS,	/* Indicates that any errors have occured */
+ 	REG_EVENT_ENABLE,	/* Controls which classes of SPI events raise an interrupt */
+@@ -84,7 +88,7 @@ static int opentitan_qspi_of_to_plat(struct udevice *dev)
+ 
+ 	dev_info(dev, "clock-frequency = %d Hz\n", plat->clk_freq);
+ 	dev_info(dev, "max-frequency = %d Hz\n", plat->max_freq);
+-	dev_info(dev, "regs @ 0x%lx\n", (unsigned long int) &plat->regs);	
++	dev_info(dev, "regs @ 0x%lx\n", (unsigned long int) plat->regs);
+ 
+ 	return 0;
+ }
+@@ -128,6 +132,9 @@ static int opentitan_qspi_probe(struct udevice *dev)
+ 	status = readl(priv->regs + REG_STATUS);
+ 	priv->byte_order = (status >> 22) & 0x1;
+ 
++	// Enable the SPI and its output
++	writel(OPENTITAN_QSPI_CONTROL_OUTPUT_EN | OPENTITAN_QSPI_CONTROL_SPI_EN, priv->regs + REG_CONTROL);
++
+ 	return 0;
+ }
+ 
+@@ -253,7 +260,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+                 		}
+ 			}
+ 
+-			writel(*((unsigned int *) tmp), priv->regs + REG_DATA);
++			writel(*((unsigned int *) tmp), priv->regs + REG_TXDATA);
+ 		}
+ 
+ 		// Less than a full word left
+@@ -278,7 +285,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 				tmp[3] = 0;
+ 			}
+ 			
+-			writel(*((unsigned int *) tmp), priv->regs + REG_DATA);
++			writel(*((unsigned int *) tmp), priv->regs + REG_TXDATA);
+ 		}
+ 	}
+ 
+@@ -313,7 +320,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 				if(((status >> 8) & 0xFF)){
+ 					if(bytes_rcvd < num_bytes){
+ 						unsigned char *dst = (unsigned char *) din;
+-						unsigned int word = readl(priv->regs + REG_DATA);
++						unsigned int word = readl(priv->regs + REG_RXDATA);
+ 
+ 						if((num_bytes - bytes_rcvd) >= 4){
+ 							if(!priv->byte_order){
+@@ -378,7 +385,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 
+ 					// Somehow we have too much data??
+ 					} else {
+-						(void) readl(priv->regs + REG_DATA);
++						(void) readl(priv->regs + REG_RXDATA);
+ 						dev_err(dev, "Device returned more data than we requested\n");
+ 					}
+ 				}
+@@ -397,7 +404,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+                     			return -1;
+                 		}
+         
+-				unsigned int word = readl((volatile unsigned int *) (priv->regs + REG_DATA));
++				unsigned int word = readl((volatile unsigned int *) (priv->regs + REG_RXDATA));
+ 				unsigned char *dst = (unsigned char *) din;
+ 
+ 
+-- 
+2.31.1
+

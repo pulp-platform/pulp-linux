@@ -1,0 +1,177 @@
+From a0123c90caa0064e05dcf7d887c5857167ba437e Mon Sep 17 00:00:00 2001
+From: Christopher Reinwardt <creinwar@ethz.ch>
+Date: Mon, 7 Nov 2022 16:19:31 +0100
+Subject: [PATCH 05/15] Update SPI driver
+
+---
+ drivers/spi/opentitan_qspi.c | 75 ++++++++++++++++++++++++++++++------
+ 1 file changed, 63 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/spi/opentitan_qspi.c b/drivers/spi/opentitan_qspi.c
+index 73ed315d67..97d9a8c276 100644
+--- a/drivers/spi/opentitan_qspi.c
++++ b/drivers/spi/opentitan_qspi.c
+@@ -20,6 +20,9 @@
+ #define OPENTITAN_QSPI_CS_USED 0
+ #define OPENTITAN_QSPI_CS_UNUSED 1
+ 
++#define OPENTITAN_QSPI_READY_TIMEOUT 10000
++#define OPENTITAN_QSPI_READ_TIMEOUT 10000
++
+ /* opentitan qspi register set */
+ enum opentitan_qspi_regs {
+ 	REG_INTR_STATE,		/* Interrupt State Register */
+@@ -154,7 +157,19 @@ static int opentitan_qspi_issue_dummy(struct udevice *dev, unsigned int bitlen,
+ 		return 0;
+ 	}
+ 
+-	unsigned int status = 0;
++    	// Wait for the SPI host to be ready
++    	unsigned int ready_timeout = OPENTITAN_QSPI_READY_TIMEOUT;
++      unsigned int status = 0;
++    	do {
++        	status = readl((volatile unsigned int *) (priv->regs + REG_STATUS));
++        	ready_timeout--;
++    	} while(!(status >> 31) && ready_timeout > 0);
++
++    	if(ready_timeout == 0 && !(status >> 31)){
++        	dev_err(dev, "Ready did not assert. Aborting\r\n");
++        	return -1;
++      }
++
+ 	unsigned int command = ((bitlen & 0x1FF) - 1) | ((csaat & 0x1) << 9);
+ 	writel(command, priv->regs + REG_COMMAND);
+ 
+@@ -205,9 +220,10 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 	}
+ 
+ 	unsigned int command = 0;
+-	unsigned int i = 0;
++    unsigned int status  = 0;
+ 		
+ 	if(dir >> 1){
++	    unsigned int i = 0;
+ 		// Take care of the word aligned part
+ 		for(; i < num_bytes/4; i++){
+ 			unsigned char tmp[4];
+@@ -269,12 +285,24 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 	// Set the correct transfer mode
+ 	command = ((num_bytes & 0x1FF) - 1) | ((csaat & 0x1) << 9) | (dir << 12);
+ 
++    	// Wait for the SPI host to be ready
++    	unsigned int ready_timeout = OPENTITAN_QSPI_READY_TIMEOUT;
++    	do {
++        	status = readl((volatile unsigned int *) (priv->regs + REG_STATUS));
++        	ready_timeout--;
++    	} while(!(status >> 31) && ready_timeout > 0);
++
++    	if(ready_timeout == 0 && !(status >> 31)){
++        	dev_err(dev, "Ready did not assert. Aborting\r\n");
++        	return -1;
++    	}
++
+ 	// Start transaction by writing to the command register
+ 	writel(command, priv->regs + REG_COMMAND);
+ 
+ 	// Wait for the FIFOs to be empty (full) if we had an actual data transfer
+ 	if(priv->cs_state && dir > 0){
+-		unsigned int status = 0;
++		status = 0;
+ 
+ 		// RX only or RX/TX
+ 		if(dir == 1 || dir == 3) {
+@@ -282,7 +310,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 			do {
+ 				status = readl(priv->regs + REG_STATUS);
+ 
+-				if(((status >> 8) & 0xFF) > 0){
++				if(((status >> 8) & 0xFF)){
+ 					if(bytes_rcvd < num_bytes){
+ 						unsigned char *dst = (unsigned char *) din;
+ 						unsigned int word = readl(priv->regs + REG_DATA);
+@@ -294,7 +322,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 								dst[1] = (word >> 16) & 0xFF;
+ 								dst[0] = (word >> 24) & 0xFF;
+ 							} else {
+-								// Store received data into din accordignment
++								// Store received data into din according to it's alignment
+                                 // 4 byte
+                                 if(!((long int) din & 0x3L)){
+                                     *((unsigned int *) din) = word;
+@@ -354,12 +382,25 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 						dev_err(dev, "Device returned more data than we requested\n");
+ 					}
+ 				}
+-			} while((((status >> 8) & 0xFF) > 0) || (status >> 30) & 0x1);
++			} while(((status >> 8) & 0xFF) || ((status >> 30) & 0x1));
+ 
+-			// TODO: take care of non 32-bit read transactions...
++            		// Wait for the last bytes of the transfer
+ 			if(bytes_rcvd < num_bytes){
+-				unsigned int word = readl(priv->regs + REG_DATA);
+-				unsigned char *dst = (unsigned char *) (din + bytes_rcvd);
++                		unsigned int read_timeout = OPENTITAN_QSPI_READ_TIMEOUT;
++                		do {
++                    			status = readl((volatile unsigned int *) (priv->regs + REG_STATUS));
++                    			read_timeout--;
++                		} while(!((status >> 8) & 0xFF) && read_timeout > 0);
++
++                		if(read_timeout == 0 && !((status >> 8) & 0xFF)){
++                    			dev_err(dev, "RX queue did not notify us about the last bytes\r\n");
++                    			return -1;
++                		}
++        
++				unsigned int word = readl((volatile unsigned int *) (priv->regs + REG_DATA));
++				unsigned char *dst = (unsigned char *) din;
++
++
+ 				if(!priv->byte_order){
+ 					// We are in here so at least one byte remains
+ 					dst[0] = (word >> 24) & 0xFF;
+@@ -370,11 +411,16 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 						bytes_rcvd++;
+ 					}
+ 
+-					if((num_bytes - bytes_rcvd) == 1){
++					if((num_bytes - bytes_rcvd) >= 1){
+ 						dst[2] = (word >> 8) & 0xFF;
+ 						bytes_rcvd++;
+ 					}
+ 
++					if((num_bytes - bytes_rcvd) == 1){
++                        dst[3] = word & 0xFF;
++						bytes_rcvd++;
++					}
++
+ 				} else {
+ 					// We are in here so at least one byte remains
+ 					dst[0] = word & 0xFF;
+@@ -385,10 +431,15 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 						bytes_rcvd++;
+ 					}
+ 
+-					if((num_bytes - bytes_rcvd) == 1){
++					if((num_bytes - bytes_rcvd) >= 1){
+ 						dst[2] = (word >> 16) & 0xFF;
+ 						bytes_rcvd++;
+ 					}
++
++					if((num_bytes - bytes_rcvd) == 1){
++                        dst[3] = (word >> 24) & 0xFF;
++						bytes_rcvd++;
++					}
+ 				}
+ 			}
+ 
+@@ -396,7 +447,7 @@ static int opentitan_qspi_xfer_single(struct udevice *child, unsigned int bitlen
+ 		} else if(dir == 2) {
+ 			do {
+ 				status = readl(priv->regs + REG_STATUS);
+-			} while((status & 0xFF) > 0);
++			} while((status >> 30) & 0x1);
+  		
+ 		// What mode is this??
+ 		} else {
+-- 
+2.31.1
+

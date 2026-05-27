@@ -3,21 +3,25 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Robert Balas <balasr@iis.ee.ethz.ch>
+# Cyril Koenig <cykoenig@iis.ee.ethz.ch>
 
-DTC = dtc
+# Avoid surprises by disabling default rules
+MAKEFLAGS += --no-builtin-rules
+.SUFFIXES:
 
-%.dtb: %.dts
-	$(DTC) -o $@ $^
-
-.PHONY: setup
-setup: target/cheshire/cheshire.dtb
-	$(MAKE) -C buildroot BR2_EXTERNAL=.. cheshire_defconfig
+PL_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 
-.PHONY: clean
-clean-buildroot:
-	$(MAKE) -C buildroot clean
+#
+# Buildroot external output folder
+#
 
-.PHONY: clean-all
-clean: clean-buildroot
-	$(RM) target/cheshire/*.dtb
+OUTPUT_BASEDIR = $(PL_ROOT)/output
+OUTPUT_BOARDNAME = $(basename $(notdir $@))
+OUTPUT_DIR = $(OUTPUT_BASEDIR)/$(OUTPUT_BOARDNAME)
+
+MAKE_BUILDROOT = $(MAKE) -C $(PL_ROOT)/buildroot BR2_EXTERNAL=$(PL_ROOT)
+
+output/% $(OUTPUT_BASEDIR)/%: $(PL_ROOT)/configs/%_defconfig
+		$(MAKE_BUILDROOT) O=$(OUTPUT_DIR) $(basename $(notdir $@))_defconfig
+		# sed -i /^BR2_DL_DIR=.*/s%%BR2_DL_DIR=$(BR2_DL_DIR)% $(OUTPUT_DIR)/.config

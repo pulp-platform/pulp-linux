@@ -1,0 +1,34 @@
+From bb8f6ac56d3de3bcfa654e7c305f1ca4a60e1349 Mon Sep 17 00:00:00 2001
+From: Paul Scheffler <paulsc@iis.ee.ethz.ch>
+Date: Thu, 20 Apr 2023 18:08:02 +0200
+Subject: [PATCH 09/15] cheshire: Fix interrupts
+
+---
+ arch/riscv/dts/pulp-platform_cheshire.dts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/riscv/dts/pulp-platform_cheshire.dts b/arch/riscv/dts/pulp-platform_cheshire.dts
+index cc320fb9b6..e910056c43 100644
+--- a/arch/riscv/dts/pulp-platform_cheshire.dts
++++ b/arch/riscv/dts/pulp-platform_cheshire.dts
+@@ -63,7 +63,7 @@
+       clock-frequency = <50000000>; // 50 MHz
+       current-speed = <115200>;
+       interrupt-parent = <&PLIC0>;
+-      interrupts = <19>;
++      interrupts = <1>;
+       reg = <0x0 0x3002000 0x0 0x1000>;
+       reg-shift = <2>; // regs are spaced on 32 bit boundary
+       reg-io-width = <4>; // only 32-bit access are supported
+@@ -71,7 +71,7 @@
+     i2c@3003000 {
+       compatible = "eth,i2c";
+       interrupt-parent = <&PLIC0>;
+-      interrupts = <1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16>;
++      interrupts = <2 3 4 5 6 7 8 9 10 11 12 13 14 15 16>;
+       reg = <0x0 0x3003000 0x0 0x1000>;
+     };
+     spi@3004000 {
+-- 
+2.31.1
+
