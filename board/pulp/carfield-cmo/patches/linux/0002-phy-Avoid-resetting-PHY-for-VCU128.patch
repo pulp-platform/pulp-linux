@@ -1,0 +1,52 @@
+From 684239545d696b445b8787e8d41cf4230cacd0ae Mon Sep 17 00:00:00 2001
+From: Cyril Koenig <cyril27koenig@gmail.com>
+Date: Mon, 14 Jul 2025 10:21:09 +0200
+Subject: [PATCH 2/2] phy: Avoid resetting PHY for VCU128
+
+---
+ drivers/net/phy/dp83867.c | 23 +++--------------------
+ 1 file changed, 3 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/net/phy/dp83867.c b/drivers/net/phy/dp83867.c
+index 4120385c5..b3efc938a 100644
+--- a/drivers/net/phy/dp83867.c
++++ b/drivers/net/phy/dp83867.c
+@@ -954,25 +954,7 @@ static int dp83867_phy_reset(struct phy_device *phydev)
+ {
+ 	int err;
+ 
+-	err = phy_write(phydev, DP83867_CTRL, DP83867_SW_RESET);
+-	if (err < 0)
+-		return err;
+-
+-	usleep_range(10, 20);
+-
+-	err = phy_modify(phydev, MII_DP83867_PHYCTRL,
+-			 DP83867_PHYCR_FORCE_LINK_GOOD, 0);
+-	if (err < 0)
+-		return err;
+-
+-	/* Configure the DSP Feedforward Equalizer Configuration register to
+-	 * improve short cable (< 1 meter) performance. This will not affect
+-	 * long cable performance.
+-	 */
+-	err = phy_write_mmd(phydev, DP83867_DEVADDR, DP83867_DSP_FFE_CFG,
+-			    0x0e81);
+-	if (err < 0)
+-		return err;
++	// On VCU128 just avoid resetting Ethernet PHY
+ 
+ 	err = phy_write(phydev, DP83867_CTRL, DP83867_SW_RESTART);
+ 	if (err < 0)
+@@ -980,7 +962,8 @@ static int dp83867_phy_reset(struct phy_device *phydev)
+ 
+ 	usleep_range(10, 20);
+ 
+-	return 0;
++	return phy_modify(phydev, MII_DP83867_PHYCTRL,
++			 DP83867_PHYCR_FORCE_LINK_GOOD, 0);
+ }
+ 
+ static void dp83867_link_change_notify(struct phy_device *phydev)
+-- 
+2.43.5
