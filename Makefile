@@ -11,12 +11,12 @@ MAKEFLAGS += --no-builtin-rules
 
 PL_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
-######################
-# Nonfree components #
-######################
+#
+# Nonfree components (CI)
+#
 
 CHS_NONFREE_REMOTE ?= git@iis-git.ee.ethz.ch:chency/pulp-linux-nonfree.git
-CHS_NONFREE_COMMIT ?= 9540dbaeb3575d1f561e4a4acf825f1eccff5023
+CHS_NONFREE_COMMIT ?= ba14962
 
 .PHONY: nonfree-init
 nonfree-init:
