@@ -1,0 +1,8 @@
+config BR2_PACKAGE_IDMA_TEST
+	bool "idma-test"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_IDMA
+	help
+	  Small userspace test program that opens the iDMA proxy character
+	  device and issues an IOCTL memcpy using IDMA_COPY_BUFFER (user
+	  buffers copied in the kernel around the DMA).

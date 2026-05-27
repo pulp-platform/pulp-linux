@@ -1,4 +1,6 @@
 source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/cachetest/Config.in"
+source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/idma/Config.in"
 source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/idma-legacy/Config.in"
 source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/idma-legacy-test/Config.in"
+source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/idma-test/Config.in"
 source "$BR2_EXTERNAL_CVA6_LINUX_PATH/package/vitetris/Config.in"
