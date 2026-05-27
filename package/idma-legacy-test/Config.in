@@ -1,0 +1,21 @@
+config BR2_PACKAGE_IDMA_LEGACY_TEST
+	bool "idma-legacy-test"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_IDMA_LEGACY
+	help
+	  Small userspace program to open /dev/idma_legacy, query the ABI
+	  version, and run an IOCTL memcpy with two user heap buffers.
+
+if BR2_PACKAGE_IDMA_LEGACY_TEST
+
+config BR2_PACKAGE_IDMA_LEGACY_TEST_EXPECT_CMO
+	bool "expect CMO (Zicbom) for coherency"
+	default n
+	help
+	  When enabled, the test issues cbo.flush / cbo.inval around DMA and
+	  checks that fence-only coherency fails as expected.
+
+	  Disable on platforms without cache management op support when the
+	  DMA path still works with a simple fence + non-coherent caches.
+
+endif

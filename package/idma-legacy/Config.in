@@ -1,0 +1,5 @@
+config BR2_PACKAGE_IDMA_LEGACY
+	bool "idma-legacy"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Out-of-tree placeholder for the idma-legacy kernel driver (skeleton).
