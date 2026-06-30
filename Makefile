@@ -9,19 +9,19 @@
 MAKEFLAGS += --no-builtin-rules
 .SUFFIXES:
 
-THIS_PATH := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+PL_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 #
 # Buildroot external output folder
 #
 
-OUTPUT_BASEDIR = $(THIS_PATH)/output
+OUTPUT_BASEDIR = $(PL_ROOT)/output
 OUTPUT_BOARDNAME = $(basename $(notdir $@))
 OUTPUT_DIR = $(OUTPUT_BASEDIR)/$(OUTPUT_BOARDNAME)
 
-MAKE_BUILDROOT = $(MAKE) -C $(THIS_PATH)/buildroot BR2_EXTERNAL=$(THIS_PATH)
+MAKE_BUILDROOT = $(MAKE) -C $(PL_ROOT)/buildroot BR2_EXTERNAL=$(PL_ROOT)
 
-output/% $(OUTPUT_BASEDIR)/%: $(THIS_PATH)/configs/%_defconfig
+output/% $(OUTPUT_BASEDIR)/%: $(PL_ROOT)/configs/%_defconfig
 		$(MAKE_BUILDROOT) O=$(OUTPUT_DIR) $(basename $(notdir $@))_defconfig
 		# sed -i /^BR2_DL_DIR=.*/s%%BR2_DL_DIR=$(BR2_DL_DIR)% $(OUTPUT_DIR)/.config
 
@@ -36,7 +36,11 @@ DTC = dtc
 
 .PHONY: setup
 setup: target/cheshire/cheshire.dtb
-	$(MAKE) -C buildroot BR2_EXTERNAL=.. cheshire_defconfig
+	$(MAKE_BUILDROOT) cheshire_defconfig
+
+.PHONY: setup-%
+setup-%: target/cheshire/cheshire.dtb
+	$(MAKE_BUILDROOT) $*_defconfig
 
 
 .PHONY: clean
