@@ -1,0 +1,56 @@
+From 6a485e7a74ab535e389c51e759ac31db49613e17 Mon Sep 17 00:00:00 2001
+From: Cyril Koenig <cyril27koenig@gmail.com>
+Date: Wed, 13 May 2026 19:14:20 +0200
+Subject: [PATCH] feat: Read chip select in bootcommand
+
+---
+ configs/pulp-platform_cheshire_defconfig | 5 ++++-
+ drivers/spi/opentitan_qspi.c             | 6 +++---
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/configs/pulp-platform_cheshire_defconfig b/configs/pulp-platform_cheshire_defconfig
+index f2b5ad19..e76b070f 100644
+--- a/configs/pulp-platform_cheshire_defconfig
++++ b/configs/pulp-platform_cheshire_defconfig
+@@ -9,8 +9,11 @@ CONFIG_OF_PRIOR_STAGE=y
+ CONFIG_BOOTDELAY=5
+ CONFIG_HUSH_PARSER=y
+ CONFIG_USE_BOOTCOMMAND=y
++# SPI default mode and speed
++CONFIG_SF_DEFAULT_MODE=0
++CONFIG_SF_DEFAULT_SPEED=25000000
+ # Boot with mmc if mmc probes normally, else boot with spi (get CS from "boot-with" in device tree)
+-CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; fdt get value boot-with /soc/spi boot-with; if test ${boot-with} -eq 0; then part size mmc 0 4 image_size; part start mmc 0 4 image_start; mmc read 0x90000000 0x${image_start} 0x${image_size}; bootm 0x90000000 - ${fdtcontroladdr}; else if sf probe 0:${boot-with}; then sf read 90000000 400000 2000000; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
++CONFIG_BOOTCOMMAND="fdt addr ${fdtcontroladdr}; setexpr.l boot_src *0x03000040; if test ${boot_src} -eq 1; then part size mmc 0 4 image_size; part start mmc 0 4 image_start; mmc read 0x90000000 0x${image_start} 0x${image_size}; bootm 0x90000000 - ${fdtcontroladdr}; else if test ${boot_src} -eq 2; then fdt get value boot-with /soc/spi boot-with; if sf probe 0:${boot-with} 25000000; then mtd read nor1 90000000 400000 800000; fi; fi; fi; bootm 90000000 - ${fdtcontroladdr};"
+ CONFIG_DISPLAY_CPUINFO=y
+ CONFIG_SPL_SPI_FLASH_MTD=y
+ CONFIG_CMD_GPT=y
+diff --git a/drivers/spi/opentitan_qspi.c b/drivers/spi/opentitan_qspi.c
+index 23d1ce06..23a6f9b4 100644
+--- a/drivers/spi/opentitan_qspi.c
++++ b/drivers/spi/opentitan_qspi.c
+@@ -85,10 +85,10 @@ static int opentitan_qspi_of_to_plat(struct udevice *dev)
+     	}
+   
+ 	// Try to read the max frequency, otherwise just use 500 kHz
+-	plat->max_freq = dev_read_u32_default(dev, "max-frequency", 500000);
++	plat->max_freq = dev_read_u32_default(dev, "spi-max-frequency", 500000);
+ 
+ 	dev_info(dev, "clock-frequency = %d Hz\n", plat->clk_freq);
+-	dev_info(dev, "max-frequency = %d Hz\n", plat->max_freq);
++	dev_info(dev, "spi-max-frequency = %d Hz\n", plat->max_freq);
+ 	dev_info(dev, "regs @ 0x%lx\n", (unsigned long int) plat->regs);
+ 
+ 	return 0;
+@@ -545,7 +545,7 @@ static int opentitan_qspi_set_speed(struct udevice *dev, uint speed)
+ 		clkdiv = ~(-1 << 16);
+ 	}
+ 
+-	dev_dbg(dev, "Saving SPI clkdiv to %x\n", clkdiv);
++	dev_dbg(dev, "Saving SPI clkdiv to %x (speed: %d, clk_freq: %d)\n", clkdiv, speed, priv->clk_freq);
+ 	priv->clkdiv = clkdiv;
+ 	return 0;
+ }
+-- 
+2.31.1
+
