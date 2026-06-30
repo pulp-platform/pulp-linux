@@ -1,0 +1,26 @@
+From 4a866a5d521b1441753e5a3d4be7dcf22acb2ecb Mon Sep 17 00:00:00 2001
+From: Paul Scheffler <paulsc@iis.ee.ethz.ch>
+Date: Thu, 27 Apr 2023 19:08:02 +0200
+Subject: [PATCH 12/15] cheshire: Adapt default boot command to load kernel
+ from lower sector
+
+---
+ configs/pulp-platform_cheshire_defconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configs/pulp-platform_cheshire_defconfig b/configs/pulp-platform_cheshire_defconfig
+index e3e4eb6b28..2eee76a129 100644
+--- a/configs/pulp-platform_cheshire_defconfig
++++ b/configs/pulp-platform_cheshire_defconfig
+@@ -8,7 +8,7 @@ CONFIG_OF_BOARD_SETUP=y
+ CONFIG_OF_PRIOR_STAGE=y
+ CONFIG_BOOTDELAY=5
+ CONFIG_USE_BOOTCOMMAND=y
+-CONFIG_BOOTCOMMAND="mmc info; mmc read 90000000 9800 5000; bootm 90000000 - $(fdtcontroladdr)"
++CONFIG_BOOTCOMMAND="mmc info; mmc read 90000000 2000 5000; bootm 90000000 - $(fdtcontroladdr)"
+ CONFIG_DISPLAY_CPUINFO=y
+ CONFIG_SPL_SPI_FLASH_MTD=y
+ CONFIG_CMD_GPT=y
+-- 
+2.31.1
+

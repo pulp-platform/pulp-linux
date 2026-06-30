@@ -1,0 +1,34 @@
+From 4e772045a047ce53b92530781dafc61664fa0f9f Mon Sep 17 00:00:00 2001
+From: Paul Scheffler <paulsc@iis.ee.ethz.ch>
+Date: Thu, 20 Apr 2023 18:07:02 +0200
+Subject: [PATCH 4/7] [WIP] cheshire: Fix DT address
+
+---
+ platform/fpga/cheshire/config.mk | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/platform/fpga/cheshire/config.mk b/platform/fpga/cheshire/config.mk
+index e731187..2d4d086 100644
+--- a/platform/fpga/cheshire/config.mk
++++ b/platform/fpga/cheshire/config.mk
+@@ -20,7 +20,8 @@ ifeq ($(PLATFORM_RISCV_XLEN), 32)
+  # This needs to be 2MB aligned for 64-bit support
+  FW_JUMP_ADDR=0x80200000
+  endif
+-FW_JUMP_FDT_ADDR=0x70000000
++# TODO: this is a cancerous workaround; set this correctly, ideally built!
++FW_JUMP_FDT_ADDR=0x80800000
+ 
+ # Firmware with payload configuration.
+ FW_PAYLOAD=y
+@@ -32,5 +33,6 @@ else
+ # This needs to be 2MB aligned for 64-bit support
+   FW_PAYLOAD_OFFSET=0x200000
+ endif
+-FW_PAYLOAD_FDT_ADDR=0x70000000
++# TODO: this is a cancerous workaround; set this correctly, ideally built!
++FW_PAYLOAD_FDT_ADDR=0x80800000
+ FW_PAYLOAD_ALIGN=0x1000
+-- 
+2.31.1
+
