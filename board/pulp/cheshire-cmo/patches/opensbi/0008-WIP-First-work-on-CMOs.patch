@@ -43,16 +43,6 @@ index 418fe15..37e5ab0 100644
 +
  	return 0;
  }
- 
-@@ -201,7 +227,7 @@ const struct sbi_platform_operations platform_ops = {
- const struct sbi_platform platform = {
- 	.opensbi_version = OPENSBI_VERSION,
- 	.platform_version = SBI_PLATFORM_VERSION(0x0, 0x01),
--	.name = "CHESHIRE RISC-V",
-+	.name = "CHESHIRE CMOs",
- 	.features = SBI_PLATFORM_DEFAULT_FEATURES,
- 	.hart_count = CHESHIRE_HART_COUNT,
- 	.hart_stack_size = SBI_PLATFORM_DEFAULT_HART_STACK_SIZE,
--- 
+
 2.31.1
 

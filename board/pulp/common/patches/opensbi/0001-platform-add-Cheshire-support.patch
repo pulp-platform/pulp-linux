@@ -1,0 +1,309 @@
+From c897ee09a4b8e24b0c78f01536c0f3ac94e4fb0f Mon Sep 17 00:00:00 2001
+From: Enrico Zelioli <ezelioli@iis.ee.ethz.ch>
+Date: Wed, 13 May 2026 18:56:10 +0200
+Subject: [PATCH] platform: add Cheshire support
+
+---
+ platform/fpga/cheshire/Kconfig           |  10 +
+ platform/fpga/cheshire/configs/defconfig |   0
+ platform/fpga/cheshire/objects.mk        |  33 ++++
+ platform/fpga/cheshire/platform.c        | 226 +++++++++++++++++++++++
+ 4 files changed, 269 insertions(+)
+ create mode 100644 platform/fpga/cheshire/Kconfig
+ create mode 100644 platform/fpga/cheshire/configs/defconfig
+ create mode 100644 platform/fpga/cheshire/objects.mk
+ create mode 100644 platform/fpga/cheshire/platform.c
+
+diff --git a/platform/fpga/cheshire/Kconfig b/platform/fpga/cheshire/Kconfig
+new file mode 100644
+index 0000000..abc53be
+--- /dev/null
++++ b/platform/fpga/cheshire/Kconfig
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: BSD-2-Clause
++
++config PLATFORM_CHESHIRE_FPGA
++	bool
++	select FDT
++	select IPI_MSWI
++	select IRQCHIP_PLIC
++	select SERIAL_UART8250
++	select TIMER_MTIMER
++	default y
+diff --git a/platform/fpga/cheshire/configs/defconfig b/platform/fpga/cheshire/configs/defconfig
+new file mode 100644
+index 0000000..e69de29
+diff --git a/platform/fpga/cheshire/objects.mk b/platform/fpga/cheshire/objects.mk
+new file mode 100644
+index 0000000..6015947
+--- /dev/null
++++ b/platform/fpga/cheshire/objects.mk
+@@ -0,0 +1,33 @@
++#
++# SPDX-License-Identifier: BSD-2-Clause
++#
++# Copyright (C) 2019 FORTH-ICS/CARV
++#		Panagiotis Peristerakis <perister@ics.forth.gr>
++#
++
++# Compiler flags
++platform-cppflags-y =
++platform-cflags-y   =
++platform-asflags-y  =
++platform-ldflags-y  =
++
++# Object to build
++platform-objs-y += platform.o
++
++# Platform XLEN
++PLATFORM_RISCV_XLEN = 64
++
++# Blobs to build
++FW_TEXT_START=0x80000000
++
++# Dynamic firmware configuration
++FW_DYNAMIC=n
++
++# Firmware that jumps at fixed address
++FW_JUMP=n
++
++# Firmware with payload configuration.
++FW_PAYLOAD=y
++# FW_PAYLOAD_ALIGN=0x1000
++FW_PAYLOAD_OFFSET=0x200000        # This needs to be 2MB aligned for 64-bit support
++FW_PAYLOAD_FDT_ADDR=0x82200000    # TODO: this is a cancerous workaround; set this correctly, ideally built!
+diff --git a/platform/fpga/cheshire/platform.c b/platform/fpga/cheshire/platform.c
+new file mode 100644
+index 0000000..07ae23b
+--- /dev/null
++++ b/platform/fpga/cheshire/platform.c
+@@ -0,0 +1,226 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/*
++ * Copyright (C) 2019 FORTH-ICS/CARV
++ *				Panagiotis Peristerakis <perister@ics.forth.gr>
++ */
++
++#include <sbi/riscv_asm.h>
++#include <sbi/riscv_encoding.h>
++#include <sbi/riscv_io.h>
++#include <sbi/sbi_types.h>
++#include <sbi/sbi_console.h>
++#include <sbi/sbi_const.h>
++#include <sbi/sbi_hart.h>
++#include <sbi/sbi_platform.h>
++#include <sbi_utils/fdt/fdt_helper.h>
++#include <sbi_utils/fdt/fdt_fixup.h>
++#include <sbi_utils/ipi/aclint_mswi.h>
++#include <sbi_utils/irqchip/plic.h>
++#include <sbi_utils/serial/uart8250.h>
++#include <sbi_utils/timer/aclint_mtimer.h>
++
++#define CHESHIRE_UART_ADDR              0x03002000
++#define CHESHIRE_UART_FREQ              50000000
++#define CHESHIRE_UART_BAUDRATE          115200
++#define CHESHIRE_UART_REG_SHIFT	        2
++#define CHESHIRE_UART_REG_WIDTH	        4
++#define CHESHIRE_UART_REG_OFFSET        0
++#define CHESHIRE_UART_CAPS              0
++#define CHESHIRE_PLIC_ADDR              0x0c000000UL
++#define CHESHIRE_PLIC_NUM_SOURCES       20
++#define CHESHIRE_HART_COUNT             1
++#define CHESHIRE_CLINT_ADDR             0x02040000
++#define CHESHIRE_ACLINT_MTIMER_FREQ     1000000
++#define CHESHIRE_ACLINT_MSWI_ADDR       (CHESHIRE_CLINT_ADDR + 0x0)
++#define CHESHIRE_ACLINT_MTIMER_ADDR     (CHESHIRE_CLINT_ADDR + 0xbff8)
++#define CHESHIRE_ACLINT_MTIMECMP_ADDR   (CHESHIRE_CLINT_ADDR + 0x4000)
++#define CHESHIRE_VGA_ADDR               0x03007000
++#define CHESHIRE_FB_ADDR                0xA0000000
++#define CHESHIRE_FB_HEIGHT              480
++#define CHESHIRE_FB_WIDTH               640
++#define CHESHIRE_FB_SIZE                (CHESHIRE_FB_WIDTH * CHESHIRE_FB_HEIGHT * 2)
++
++
++static struct platform_uart_data uart = {
++	CHESHIRE_UART_ADDR,
++	CHESHIRE_UART_FREQ,
++	CHESHIRE_UART_BAUDRATE,
++};
++
++static struct plic_data plic = {
++	.addr    = CHESHIRE_PLIC_ADDR,
++	.num_src = CHESHIRE_PLIC_NUM_SOURCES,
++};
++
++static struct aclint_mswi_data mswi = {
++	.addr         = CHESHIRE_ACLINT_MSWI_ADDR,
++	.size         = ACLINT_MSWI_SIZE,
++	.first_hartid = 0,
++	.hart_count   = CHESHIRE_HART_COUNT,
++};
++
++static struct aclint_mtimer_data mtimer = {
++	.mtime_freq     = CHESHIRE_ACLINT_MTIMER_FREQ,
++	.mtime_addr     = CHESHIRE_ACLINT_MTIMER_ADDR,
++	.mtime_size     = 8,
++	.mtimecmp_addr  = CHESHIRE_ACLINT_MTIMECMP_ADDR,
++	.mtimecmp_size  = 16,
++	.first_hartid   = 0,
++	.hart_count     = CHESHIRE_HART_COUNT,
++	.has_64bit_mmio = true,
++};
++
++/*
++ * Cheshire platform early initialization.
++ */
++static int cheshire_early_init(bool cold_boot)
++{
++	const void *fdt;
++	struct platform_uart_data fdt_uart;
++	int rc;
++
++	if (!cold_boot)
++		return 0;
++
++	fdt = fdt_get_address();
++
++	rc = fdt_parse_uart8250(fdt, &fdt_uart, "ns16550a");
++	if (!rc)
++		uart = fdt_uart;
++
++	return uart8250_init(uart.addr,
++			     uart.freq,
++			     uart.baud,
++			     CHESHIRE_UART_REG_SHIFT,
++			     CHESHIRE_UART_REG_WIDTH,
++			     CHESHIRE_UART_REG_OFFSET,
++			     CHESHIRE_UART_CAPS);
++}
++
++static void cheshire_vga_init(void)
++{
++	int col_width;
++	volatile uint16_t *fb;
++	volatile uint32_t *vga;
++	// Generate test pattern for screen
++	uint16_t RGB[8] = {
++		0xffff, //White
++		0xffe0, //Yellow
++		0x07ff, //Cyan
++		0x07E0, //Green
++		0xf81f, //Magenta
++		0xF800, //Red
++		0x001F, //Blue
++		0x0000, //Black
++	};
++	col_width = CHESHIRE_FB_WIDTH / 8;
++
++    	fb = (volatile uint16_t*)(void*)(uintptr_t) CHESHIRE_FB_ADDR;
++
++    	for (int i=0; i < CHESHIRE_FB_HEIGHT; i++) {
++        	for (int j=0; j < CHESHIRE_FB_WIDTH; j++) {
++        		fb[CHESHIRE_FB_WIDTH * i + j] = RGB[j / col_width];
++        	}
++	}
++
++	// Pointer array to acces VGA control registers.
++	// Every index step increases the pointer by 32bit
++	vga = (volatile uint32_t*)(void*)(uintptr_t) CHESHIRE_VGA_ADDR;
++
++    	// Initialize VGA controller and populate framebuffer
++    	// Clk div
++    	vga[1] = 0x2; // 8 for Sim, 2 for FPGA
++
++	// Hori: Visible, Front porch, Sync, Back porch
++	vga[2] = 0x280;
++	vga[3] = 0x10;
++	vga[4] = 0x60;
++	vga[5] = 0x30;
++
++	// Vert: Visible, Front porch, Sync, Back porch
++	vga[6] = 0x1e0;
++	vga[7] = 0xA;
++	vga[8] = 0x2;
++	vga[9] = 0x21;
++
++	// Framebuffer start address
++	vga[10] = CHESHIRE_FB_ADDR; // Low 32 bit
++	vga[11] = 0x0;              // High 32 bit
++
++	// Framebuffer size
++	vga[12] = CHESHIRE_FB_WIDTH*CHESHIRE_FB_HEIGHT*2;      // 640*480 pixel a 2 byte/pixel
++
++	// Burst length
++	vga[13] = 16;  // 64b * 16 = 128B Bursts
++
++	// 0: Enable
++	// 1: Hsync polarity (Active Low  = 0)
++	// 2: Vsync polarity (Active Low  = 0)
++	vga[0] = 0x1;
++}
++
++/*
++ * Cheshire platform final initialization.
++ */
++static int cheshire_final_init(bool cold_boot)
++{
++	void *fdt;
++
++	if (!cold_boot)
++		return 0;
++
++	fdt = fdt_get_address_rw();
++	fdt_fixups(fdt);
++
++	cheshire_vga_init();
++
++	return 0;
++}
++
++/*
++ * Initialize the cheshire interrupt controller for current HART.
++ */
++static int cheshire_irqchip_init(void)
++{
++	int ret;
++	ret = plic_cold_irqchip_init(&plic);
++	return ret;
++}
++
++/*
++ * Initialize IPI for current HART.
++ */
++static int cheshire_ipi_init(void)
++{
++	return aclint_mswi_cold_init(&mswi);
++}
++
++/*
++ * Initialize cheshire timer for current HART.
++ */
++static int cheshire_timer_init(void)
++{
++	return aclint_mtimer_cold_init(&mtimer, NULL);
++}
++
++/*
++ * Platform descriptor.
++ */
++const struct sbi_platform_operations platform_ops = {
++	.early_init   = cheshire_early_init,
++	.final_init   = cheshire_final_init,
++	.irqchip_init = cheshire_irqchip_init,
++	.ipi_init     = cheshire_ipi_init,
++	.timer_init   = cheshire_timer_init
++};
++
++const struct sbi_platform platform = {
++	.opensbi_version   = OPENSBI_VERSION,
++	.platform_version  = SBI_PLATFORM_VERSION(0x0, 0x01),
++	.name              = "CHESHIRE RISC-V",
++	.features          = SBI_PLATFORM_DEFAULT_FEATURES,
++	.hart_count        = CHESHIRE_HART_COUNT,
++	.hart_stack_size   = SBI_PLATFORM_DEFAULT_HART_STACK_SIZE,
++	.heap_size         = SBI_PLATFORM_DEFAULT_HEAP_SIZE(CHESHIRE_HART_COUNT),
++	.platform_ops_addr = (unsigned long)&platform_ops
++};
+-- 
+2.31.1
+
