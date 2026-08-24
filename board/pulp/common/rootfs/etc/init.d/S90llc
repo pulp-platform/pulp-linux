@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# LLC        Enable LLC
+#
+
+start() {
+    devmem 0x3001000 32 0
+    devmem 0x3001010 32 1
+    echo "LLC enabled"
+}
+
+stop() {
+}
+
+case "$1" in
+    start)
+        start;;
+    stop)
+        stop;;
+    restart)
+        stop
+        start;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
+
+exit 0
